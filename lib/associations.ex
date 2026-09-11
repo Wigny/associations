@@ -52,11 +52,12 @@ defmodule Associations do
     [
       for {schema, :belongs_to, name, target, opts} <- associations do
         foreign_key = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
+        references = Keyword.get(opts, :references, :id)
 
         quote do
           def load(%unquote(schema){unquote(foreign_key) => value}, unquote(name)) do
             __dataloader__()
-            |> Associations.fetch(unquote(target), %{id: value})
+            |> Associations.fetch(unquote(target), %{unquote(references) => value})
             |> List.first()
           end
         end
@@ -67,8 +68,10 @@ defmodule Associations do
             :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
           end)
 
+        references = Keyword.get(opts, :references, :id)
+
         quote do
-          def load(%unquote(schema){id: value}, unquote(name)) do
+          def load(%unquote(schema){unquote(references) => value}, unquote(name)) do
             Associations.fetch(__dataloader__(), unquote(target), %{unquote(foreign_key) => value})
           end
         end
@@ -138,18 +141,20 @@ defmodule Associations do
   @doc """
   Declares that the enclosing schema holds the foreign key pointing to `schema`.
 
-  `load/2` reads the foreign key off the struct and searches `schema` by `:id`, returning a single
-  record or `nil`.
+  `load/2` reads the foreign key off the struct and searches `schema` by its primary key,
+  returning a single record or `nil`.
 
       association Car do
         belongs_to :owner, Person
-        belongs_to :dealer, Company, foreign_key: :sold_by_id
+        belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
       end
 
   ## Options
 
     * `:foreign_key` - the field of the enclosing schema holding the id of the associated record.
       Defaults to `name` suffixed with `_id`, so `belongs_to :owner, Person` reads `:owner_id`.
+
+    * `:references` - the field of `schema` the foreign key points at. Defaults to `:id`.
   """
   @spec belongs_to(atom(), module(), keyword()) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
@@ -162,8 +167,8 @@ defmodule Associations do
   @doc """
   Declares that `schema` holds the foreign key pointing to the enclosing schema.
 
-  `load/2` reads `:id` off the struct and searches `schema` by the foreign key, returning a list
-  of records.
+  `load/2` reads the primary key off the struct and searches `schema` by the foreign key,
+  returning a list of records.
 
       association Person do
         has_many :cars, Car, foreign_key: :owner_id
@@ -175,6 +180,9 @@ defmodule Associations do
     * `:foreign_key` - the field of `schema` holding the id of the enclosing record. Defaults to
       the enclosing module name, underscored and suffixed with `_id`. Inside `association Person`,
       `has_many :licences, Licence` searches `Licence` by `:person_id`.
+
+    * `:references` - the field of the enclosing schema the foreign key points at. Defaults to
+      `:id`.
   """
   @spec has_many(atom(), module(), keyword()) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do

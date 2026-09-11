@@ -3,19 +3,26 @@ defmodule AssociationsTest do
   doctest Associations
 
   alias Garage.Car
+  alias Garage.Dealer
   alias Garage.Person
   alias Garage.Relations
 
   setup do
     person1 = %Person{id: 1, name: "John"}
     person2 = %Person{id: 2, name: "Mary"}
-    car1 = %Car{id: 1, color: "red", owner_id: person1.id}
-    car2 = %Car{id: 2, color: "yellow", owner_id: person1.id}
-    car3 = %Car{id: 3, color: "blue", owner_id: person2.id}
+    dealer1 = %Dealer{code: "AAA", name: "Anne"}
+    dealer2 = %Dealer{code: "BBB", name: "Bill"}
+    car1 = %Car{id: 1, color: "red", owner_id: person1.id, dealer_code: dealer1.code}
+    car2 = %Car{id: 2, color: "yellow", owner_id: person1.id, dealer_code: dealer1.code}
+    car3 = %Car{id: 3, color: "blue", owner_id: person2.id, dealer_code: dealer2.code}
 
-    Garage.put([person1, person2, car1, car2, car3])
+    Garage.put([person1, person2, dealer1, dealer2, car1, car2, car3])
 
-    %{persons: [person1, person2], cars: [car1, car2, car3]}
+    %{
+      persons: [person1, person2],
+      dealers: [dealer1, dealer2],
+      cars: [car1, car2, car3]
+    }
   end
 
   test "loads a has_many association", %{persons: [person1, person2], cars: [car1, car2, car3]} do
@@ -29,6 +36,25 @@ defmodule AssociationsTest do
     assert Relations.load(car2, :owner) == person1
     assert Relations.load(car3, :owner) == person2
     assert Relations.load(%Car{id: 4, color: "green", owner_id: 3}, :owner) == nil
+  end
+
+  test "loads a has_many association referencing a field other than :id", %{
+    dealers: [dealer1, dealer2],
+    cars: [car1, car2, car3]
+  } do
+    assert_lists Relations.load(dealer1, :cars), [car1, car2]
+    assert_lists Relations.load(dealer2, :cars), [car3]
+    assert_lists Relations.load(%Dealer{code: "CCC", name: "Cleo"}, :cars), []
+  end
+
+  test "loads a belongs_to association referencing a field other than :id", %{
+    dealers: [dealer1, dealer2],
+    cars: [car1, car2, car3]
+  } do
+    assert Relations.load(car1, :dealer) == dealer1
+    assert Relations.load(car2, :dealer) == dealer1
+    assert Relations.load(car3, :dealer) == dealer2
+    assert Relations.load(%Car{id: 4, dealer_code: "CCC"}, :dealer) == nil
   end
 
   defp assert_lists(list1, list2) do

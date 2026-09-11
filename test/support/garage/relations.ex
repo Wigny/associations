@@ -4,6 +4,7 @@ defmodule Garage.Relations do
   use Associations
 
   alias Garage.Car
+  alias Garage.Dealer
   alias Garage.Person
 
   loader fn schema, searches ->
@@ -12,9 +13,14 @@ defmodule Garage.Relations do
 
   association Car do
     belongs_to :owner, Person
+    belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
   end
 
   association Person do
     has_many :cars, Car, foreign_key: :owner_id
+  end
+
+  association Dealer do
+    has_many :cars, Car, foreign_key: :dealer_code, references: :code
   end
 end
