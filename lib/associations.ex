@@ -50,15 +50,32 @@ defmodule Associations do
     associations = Module.get_attribute(env.module, :associations)
 
     [
+      for {schema, _kind, name, _target, _opts} <- associations do
+        quote do
+          def load(%unquote(schema){} = record, unquote(name)) do
+            [{^record, result}] = load_many([record], unquote(name))
+
+            result
+          end
+        end
+      end,
       for {schema, :belongs_to, name, target, opts} <- associations do
         foreign_key = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
         references = Keyword.get(opts, :references, :id)
 
         quote do
-          def load(%unquote(schema){unquote(foreign_key) => value}, unquote(name)) do
-            __dataloader__()
-            |> Associations.fetch(unquote(target), %{unquote(references) => value})
-            |> List.first()
+          def load_many([%unquote(schema){} | _] = records, unquote(name)) do
+            searches =
+              Enum.map(records, fn %unquote(schema){unquote(foreign_key) => value} ->
+                %{unquote(references) => value}
+              end)
+
+            results =
+              __dataloader__()
+              |> Associations.fetch_all(unquote(target), searches)
+              |> Enum.map(&List.first/1)
+
+            Enum.zip(records, results)
           end
         end
       end,
@@ -71,21 +88,31 @@ defmodule Associations do
         references = Keyword.get(opts, :references, :id)
 
         quote do
-          def load(%unquote(schema){unquote(references) => value}, unquote(name)) do
-            Associations.fetch(__dataloader__(), unquote(target), %{unquote(foreign_key) => value})
+          def load_many([%unquote(schema){} | _] = records, unquote(name)) do
+            searches =
+              Enum.map(records, fn %unquote(schema){unquote(references) => value} ->
+                %{unquote(foreign_key) => value}
+              end)
+
+            results = Associations.fetch_all(__dataloader__(), unquote(target), searches)
+
+            Enum.zip(records, results)
           end
         end
+      end,
+      quote do
+        def load_many([], _name), do: []
       end
     ]
   end
 
   @doc false
-  @spec fetch(Dataloader.t(), module(), search()) :: term()
-  def fetch(dataloader, schema, search) do
+  @spec fetch_all(Dataloader.t(), module(), [search()]) :: [term()]
+  def fetch_all(dataloader, schema, searches) do
     dataloader
-    |> Dataloader.load(:loader, schema, search)
+    |> Dataloader.load_many(:loader, schema, searches)
     |> Dataloader.run()
-    |> Dataloader.get(:loader, schema, search)
+    |> Dataloader.get_many(:loader, schema, searches)
   end
 
   @doc """

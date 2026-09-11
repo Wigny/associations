@@ -8,6 +8,8 @@ defmodule Garage.Relations do
   alias Garage.Person
 
   loader fn schema, searches ->
+    Garage.count_batch()
+
     Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
   end
 
