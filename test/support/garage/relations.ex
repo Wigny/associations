@@ -11,10 +11,8 @@ defmodule Garage.Relations do
   alias Garage.Service
 
   @impl true
-  def fetch(schema, searches) do
-    Garage.count_batch()
-
-    Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
+  def fetch(schema, field, values) do
+    Garage.list_by(schema, field, values)
   end
 
   association Car do

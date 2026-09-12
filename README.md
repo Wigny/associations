@@ -9,8 +9,8 @@ defmodule Relations do
   use Associations
 
   @impl true
-  def fetch(schema, searches) do
-    Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
+  def fetch(schema, field, values) do
+    Garage.list_by(schema, field, values)
   end
 
   association Car do
@@ -61,7 +61,22 @@ A path returns a single record only when every association along it is a `belong
 
 ## Fetching
 
-Every association goes through the single `fetch/2` callback. It receives the schema being loaded and the searches batched for it, and returns a map pairing each search with the records matching it. A search is a map of fields and values, such as `%{owner_id: 1}`, so the callback has to handle each schema it may be asked for.
+Every association goes through the single `fetch/3` callback. It receives the schema being loaded, the field to search it by, and every value that field is searched by in the batch, and returns a flat list of records. It is asked for all the values at once, so it is meant to be answered with one query, one request or one lookup, whatever the records come from:
+
+```elixir
+@impl true
+def fetch(Car, :owner_id, owner_ids) do
+  Garage.list_cars(owner_ids: owner_ids)
+end
+
+def fetch(Customer, :id, ids) do
+  Billing.get_customers(ids)
+end
+```
+
+The callback has to handle each schema it may be asked for, but nothing more: the records come back as a plain list and `load/2` groups them by `field` itself, so a record matching none of the values is ignored and a source that can only answer more coarsely may return more than it was asked for.
+
+A batch is grouped by the field it searches, so loading one association over records of different schemas calls `fetch/3` once per field, each call holding every value that field is searched by.
 
 ## Installation
 

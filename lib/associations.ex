@@ -2,16 +2,16 @@ defmodule Associations do
   @moduledoc """
   Declarative associations between plain structs.
 
-  A module that `use`s `Associations` implements the `c:fetch/2` callback, which knows how to
+  A module that `use`s `Associations` implements the `c:fetch/3` callback, which knows how to
   fetch records, and declares one `association/2` block per struct. The declarations are resolved
-  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:fetch/2`.
+  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:fetch/3`.
 
       defmodule Relations do
         use Associations
 
         @impl true
-        def fetch(schema, searches) do
-          Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
+        def fetch(schema, field, values) do
+          Garage.list_by(schema, field, values)
         end
 
         association Car do
@@ -60,19 +60,34 @@ defmodule Associations do
   alias Associations.Resolver
 
   @doc """
-  Fetches the records of `schema` matching each of `searches`.
+  Fetches the records of `schema` whose `field` holds one of `values`.
 
   Every association of the module goes through this single callback, so it must handle each schema
-  it may be asked for. A search is a map of fields and values, such as `%{owner_id: 1}`, and the
-  returned map pairs each of the searches it was given with the records matching it.
+  it may be asked for. It is asked for every value at once, so it is meant to be answered with one
+  query, one request or one lookup, whatever the records come from.
 
       @impl true
-      def fetch(schema, searches) do
-        Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
+      def fetch(Car, :owner_id, owner_ids) do
+        Garage.list_cars(owner_ids: owner_ids)
       end
+
+      def fetch(Customer, :id, ids) do
+        Billing.get_customers(ids)
+      end
+
+  The field arrives as a name, so a source that takes the field it searches by can answer every
+  schema in a single clause instead.
+
+  The records are returned as a flat list, in any order between values and in the order they are
+  wanted within one; `load/2` and `load_many/2` group them by `field` themselves. A record that
+  matches none of `values` is ignored, so a source that can only answer more coarsely may return
+  more than it was asked for.
+
+  A batch of searches is grouped by the field it searches, so loading one association over records
+  of different schemas calls this once per field, each call holding every value that field is
+  searched by. The calls come in the order the records being loaded ask for them.
   """
-  @callback fetch(schema :: module(), searches :: [search]) :: %{search => [struct()]}
-            when search: %{atom() => term()}
+  @callback fetch(schema :: module(), field :: atom(), values :: [term()]) :: [struct()]
 
   defmacro __using__(_opts) do
     quote do

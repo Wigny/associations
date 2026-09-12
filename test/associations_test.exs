@@ -190,7 +190,16 @@ defmodule AssociationsTest do
     assert cars1 == [car1, car2]
     assert cars2 == [car1, car2]
 
-    assert Garage.batches() == 1
+    assert Garage.batches() == 2
+  end
+
+  test "fetches every value a field is searched by in a single call", %{
+    customers: [customer1, customer2],
+    dealers: [dealer1, _dealer2]
+  } do
+    Relations.load_many([customer1, customer2, dealer1], :cars)
+
+    assert Garage.calls() == [{Car, :owner_id, [1, 2]}, {Car, :dealer_code, ["AAA"]}]
   end
 
   test "finds nothing for a record whose key is nil", %{

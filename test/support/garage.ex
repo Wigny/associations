@@ -6,42 +6,46 @@ defmodule Garage do
   def put(records) do
     table = ensure_table_started()
 
-    # Indexed from the rows already there, so a later put does not reuse a key, and so that the
-    # records are listed in the order they were put in.
-    rows =
-      records
-      |> Enum.with_index(:ets.info(table, :size))
-      |> Enum.map(fn {record, index} -> {{record.__struct__, index}, record} end)
-
-    :ets.insert(table, rows)
+    :ets.insert(table, {:records, records(table) ++ records})
   end
 
-  @doc "Lists the records matching `search`, in the order they were put in."
-  def list_by(schema, search) do
-    count(:searches)
+  @doc "Lists the records whose `field` holds one of `values`, in the order they were put in."
+  def list_by(schema, field, values) do
+    table = ensure_table_started()
 
+    record_call(table, {schema, field, values})
+
+    Enum.filter(records(table), fn record ->
+      is_struct(record, schema) and Map.fetch!(record, field) in values
+    end)
+  end
+
+  @doc "The calls the loader made, in the order it made them."
+  def calls do
     @table
-    |> :ets.match_object({{schema, :_}, search})
+    |> :ets.match_object({{:call, :_}, :_})
     |> Enum.sort()
-    |> Enum.map(fn {_key, record} -> record end)
+    |> Enum.map(fn {_key, call} -> call end)
   end
 
-  @doc "Counts one call of the loader function, to tell batched searches from repeated ones."
-  def count_batch, do: count(:batches)
+  @doc "How many times the loader was called, to tell batched searches from repeated ones."
+  def batches, do: length(calls())
 
-  def batches, do: counter(:batches)
-
-  @doc "How many searches the loader was asked for, counting a repeated one once."
-  def searches, do: counter(:searches)
-
-  defp count(name) do
-    :ets.update_counter(ensure_table_started(), name, {2, 1}, {name, 0})
+  @doc "How many values the loader was asked for, counting a repeated one once."
+  def searches do
+    Enum.sum_by(calls(), fn {_schema, _field, values} -> length(values) end)
   end
 
-  defp counter(name) do
-    case :ets.lookup(@table, name) do
-      [{^name, count}] -> count
-      [] -> 0
+  defp record_call(table, call) do
+    index = :ets.update_counter(table, :calls, {2, 1}, {:calls, 0})
+
+    :ets.insert(table, {{:call, index}, call})
+  end
+
+  defp records(table) do
+    case :ets.lookup(table, :records) do
+      [{:records, records}] -> records
+      [] -> []
     end
   end
 
