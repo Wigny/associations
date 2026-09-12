@@ -8,7 +8,8 @@ defmodule Garage.Relations do
   alias Garage.Invoice
   alias Garage.Person
 
-  loader fn schema, searches ->
+  @impl true
+  def fetch(schema, searches) do
     Garage.count_batch()
 
     Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)

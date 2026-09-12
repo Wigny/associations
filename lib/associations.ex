@@ -2,14 +2,15 @@ defmodule Associations do
   @moduledoc """
   Declarative associations between plain structs.
 
-  A module that `use`s `Associations` declares a `loader/1` function that knows how to fetch
-  records and one `association/2` block per struct. The declarations are resolved while the
-  module compiles, and `load/2` and `load_many/2` read them to search through the loader.
+  A module that `use`s `Associations` implements the `c:fetch/2` callback, which knows how to
+  fetch records, and declares one `association/2` block per struct. The declarations are resolved
+  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:fetch/2`.
 
       defmodule Relations do
         use Associations
 
-        loader fn schema, searches ->
+        @impl true
+        def fetch(schema, searches) do
           Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
         end
 
@@ -45,10 +46,27 @@ defmodule Associations do
   # The name of the single Dataloader source every association is searched through.
   @source :loader
 
+  @doc """
+  Fetches the records of `schema` matching each of `searches`.
+
+  Every association of the module goes through this single callback, so it must handle each schema
+  it may be asked for. A search is a map of fields and values, such as `%{owner_id: 1}`, and the
+  returned map pairs each of the searches it was given with the records matching it.
+
+      @impl true
+      def fetch(schema, searches) do
+        Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
+      end
+  """
+  @callback fetch(schema :: module(), searches :: [search]) :: %{search => [struct()]}
+            when search: %{atom() => term()}
+
   defmacro __using__(_opts) do
     quote do
       import Associations,
-        only: [loader: 1, association: 2, belongs_to: 2, belongs_to: 3, has_many: 2, has_many: 3]
+        only: [association: 2, belongs_to: 2, belongs_to: 3, has_many: 2, has_many: 3]
+
+      @behaviour Associations
 
       Module.register_attribute(__MODULE__, :declarations, accumulate: true)
 
@@ -118,7 +136,7 @@ defmodule Associations do
         {target, %{to => Map.fetch!(record, from)}}
       end)
 
-    results = fetch_all(module.__dataloader__(), lookups)
+    results = fetch_all(module, lookups)
 
     Enum.zip(records, results)
   end
@@ -133,7 +151,10 @@ defmodule Associations do
     end
   end
 
-  defp fetch_all(dataloader, lookups) do
+  defp fetch_all(module, lookups) do
+    source = Dataloader.KV.new(&module.fetch/2)
+    dataloader = Dataloader.add_source(Dataloader.new(), @source, source)
+
     dataloader =
       lookups
       |> Enum.reduce(dataloader, fn {schema, search}, dataloader ->
@@ -144,33 +165,6 @@ defmodule Associations do
     Enum.map(lookups, fn {schema, search} ->
       Dataloader.get(dataloader, @source, schema, search)
     end)
-  end
-
-  @doc """
-  Declares the function used to fetch the associated records.
-
-  `fun` is called with the schema being loaded and the list of searches batched for it, and must
-  return a map pairing each of those searches with the records matching it. A search is a map of
-  fields and values, such as `%{owner_id: 1}`.
-
-      loader fn schema, searches ->
-        Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
-      end
-
-  Every association of the module goes through this single function, so it must handle each schema
-  it may be asked for.
-  """
-  @spec loader(Macro.t()) :: Macro.t()
-  defmacro loader(fun) do
-    quote do
-      def __dataloader__ do
-        Dataloader.add_source(
-          Dataloader.new(),
-          unquote(@source),
-          Dataloader.KV.new(unquote(fun))
-        )
-      end
-    end
   end
 
   @doc """

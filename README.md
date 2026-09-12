@@ -8,7 +8,8 @@ Structs that come from anywhere (an API client, an ETS table, a context function
 defmodule Relations do
   use Associations
 
-  loader fn schema, searches ->
+  @impl true
+  def fetch(schema, searches) do
     Map.new(searches, fn search -> {search, Garage.list_by(schema, search)} end)
   end
 
@@ -45,9 +46,9 @@ Relations.load_many([person, dealer], :cars)
 
 The records may be of different schemas, as above, as long as each declares the association. Records looking for the same thing are searched for once.
 
-## The loader
+## Fetching
 
-Every association goes through the single function given to `loader/1`. It receives the schema being loaded and the searches batched for it, and returns a map pairing each search with the records matching it. A search is a map of fields and values, such as `%{owner_id: 1}`, so the function has to handle each schema it may be asked for.
+Every association goes through the single `fetch/2` callback. It receives the schema being loaded and the searches batched for it, and returns a map pairing each search with the records matching it. A search is a map of fields and values, such as `%{owner_id: 1}`, so the callback has to handle each schema it may be asked for.
 
 ## Installation
 
