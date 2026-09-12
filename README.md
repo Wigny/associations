@@ -14,10 +14,10 @@ defmodule Garage do
   end
 
   association Car do
-    belongs_to :owner, Person
+    belongs_to :owner, Customer
   end
 
-  association Person do
+  association Customer do
     has_many :cars, Car, foreign_key: :owner_id
   end
 end
@@ -25,10 +25,10 @@ end
 
 ```elixir
 Garage.load(car, :owner)
-#=> %Person{id: 1}
+#=> %Customer{id: 1}
 
-Garage.load_many([person, dealer], :cars)
-#=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
+Garage.load_many([customer, dealer], :cars)
+#=> [{%Customer{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 ```
 
 The `Associations` documentation covers association paths, the `Associations.belongs_to/3`,

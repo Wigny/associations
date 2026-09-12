@@ -15,19 +15,19 @@ defmodule Associations do
         end
 
         association Car do
-          belongs_to :owner, Person
+          belongs_to :owner, Customer
         end
 
-        association Person do
+        association Customer do
           has_many :cars, Car, foreign_key: :owner_id
         end
       end
 
-      Garage.load(person, :cars)
+      Garage.load(customer, :cars)
       #=> [%Car{id: 1, owner_id: 1}, %Car{id: 2, owner_id: 1}]
 
       Garage.load(car, :owner)
-      #=> %Person{id: 1}
+      #=> %Customer{id: 1}
 
   A `belongs_to` association returns a single record, or `nil` when none matches; it raises when
   more than one does. A `has_many` association returns a list, and so does a `many_to_many` one,
@@ -37,8 +37,8 @@ defmodule Associations do
   over a list from querying once per record. It returns a `{record, records}` pair per record,
   in the order they were given, always with a list on the right.
 
-      Garage.load_many([person, dealer], :cars)
-      #=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
+      Garage.load_many([customer, dealer], :cars)
+      #=> [{%Customer{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 
   The records it is given may be of different schemas, as above, as long as each of them declares
   the association. Records looking for the same thing are searched for once.
@@ -48,7 +48,7 @@ defmodule Associations do
   searched for in its own batch, no matter how many records reached it, and the records the last
   hop found are returned without repeats.
 
-      Garage.load(person, [:cars, :dealer])
+      Garage.load(customer, [:cars, :dealer])
       #=> [%Dealer{code: "AAA"}]
 
   A path returns a single record only when every association along it is a `belongs_to`; one
@@ -158,7 +158,7 @@ defmodule Associations do
   from a `schema` struct.
 
       association Car do
-        belongs_to :owner, Person
+        belongs_to :owner, Customer
       end
 
   A schema may be declared more than once; the declarations accumulate.
@@ -181,14 +181,14 @@ defmodule Associations do
   returning a single record or `nil`.
 
       association Car do
-        belongs_to :owner, Person
+        belongs_to :owner, Customer
         belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
       end
 
   ## Options
 
     * `:foreign_key` - the field of the enclosing schema holding the id of the associated record.
-      Defaults to `name` suffixed with `_id`, so `belongs_to :owner, Person` reads `:owner_id`.
+      Defaults to `name` suffixed with `_id`, so `belongs_to :owner, Customer` reads `:owner_id`.
 
     * `:references` - the field of `schema` the foreign key points at. Defaults to `:id`.
 
@@ -215,16 +215,16 @@ defmodule Associations do
   `load/2` reads the primary key off the struct and searches `schema` by the foreign key,
   returning a list of records.
 
-      association Person do
+      association Customer do
         has_many :cars, Car, foreign_key: :owner_id
-        has_many :licences, Licence
+        has_many :invoices, Invoice
       end
 
   ## Options
 
     * `:foreign_key` - the field of `schema` holding the id of the enclosing record. Defaults to
-      the enclosing module name, underscored and suffixed with `_id`. Inside `association Person`,
-      `has_many :licences, Licence` searches `Licence` by `:person_id`.
+      the enclosing module name, underscored and suffixed with `_id`. Inside `association Customer`,
+      `has_many :invoices, Invoice` searches `Invoice` by `:customer_id`.
 
     * `:references` - the field of the enclosing schema the foreign key points at. Defaults to
       `:id`.
