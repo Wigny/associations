@@ -96,7 +96,7 @@ defmodule Associations do
   records of different schemas calls this once per set of fields, each call holding every row
   those fields are searched by. The calls come in the order the records being loaded ask for them.
   """
-  @callback fetch(schema :: module(), fields :: [atom()], values :: [[term()]]) :: [struct()]
+  @callback fetch(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
 
   defmacro __using__(_opts) do
     quote do
@@ -138,7 +138,7 @@ defmodule Associations do
 
   A schema may be declared more than once; the declarations accumulate.
   """
-  @spec association(module(), [{:do, Macro.t()}]) :: Macro.t()
+  @spec association(module, [{:do, Macro.t()}]) :: Macro.t()
   defmacro association(schema, do: block) do
     quote do
       @association_schema unquote(schema)
@@ -176,7 +176,7 @@ defmodule Associations do
           references: [:manufacturer_code, :part_number]
       end
   """
-  @spec belongs_to(atom(), module(), keyword()) :: Macro.t()
+  @spec belongs_to(atom, module, keyword) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
     quote do
       @declarations {@association_schema, :belongs_to, unquote(name), unquote(schema),
@@ -213,7 +213,7 @@ defmodule Associations do
           references: [:manufacturer_code, :part_number]
       end
   """
-  @spec has_many(atom(), module(), keyword()) :: Macro.t()
+  @spec has_many(atom, module, keyword) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
     quote do
       @declarations {@association_schema, :has_many, unquote(name), unquote(schema),
@@ -254,7 +254,7 @@ defmodule Associations do
               ]
           end
   """
-  @spec many_to_many(atom(), module(), keyword()) :: Macro.t()
+  @spec many_to_many(atom, module, keyword) :: Macro.t()
   defmacro many_to_many(name, schema, opts) do
     quote do
       @declarations {@association_schema, :many_to_many, unquote(name), unquote(schema),

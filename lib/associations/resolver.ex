@@ -7,19 +7,19 @@ defmodule Associations.Resolver do
   `:target` is the schema to search, `:from` the fields the values are read off the record at
   hand, and `:to` the fields of `:target` those values are matched against, one for one.
   """
-  @type step :: %{target: module(), from: [atom()], to: [atom()]}
+  @type step :: %{target: module, from: [atom], to: [atom]}
 
   @typedoc """
   A search of one schema by its fields and their values, such as `{Car, [:owner_id], [1]}`.
   """
-  @type lookup :: {target :: module(), fields :: [atom()], values :: [term()]}
+  @type lookup :: {target :: module, fields :: [atom], values :: [term]}
 
   @doc """
   Builds the step that reads `from` off a record and searches `target` by `to`.
 
   Either may name more than one field, and the two are paired in the order they are given.
   """
-  @spec step(module(), [atom()], [atom()]) :: step()
+  @spec step(module, [atom], [atom]) :: step
   def step(target, from, to), do: %{target: target, from: from, to: to}
 
   @doc """
@@ -37,7 +37,7 @@ defmodule Associations.Resolver do
 
   Returns the records each walk ended on, in the order the walks were given.
   """
-  @spec resolve(module(), [{struct(), [step()]}]) :: [[struct()]]
+  @spec resolve(module, [{struct, [step]}]) :: [[struct]]
   def resolve(module, walks) do
     hop(module, Enum.map(walks, fn {record, steps} -> {steps, [record]} end))
   end
