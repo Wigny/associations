@@ -48,7 +48,8 @@ defmodule AssociationsTest do
       dealers: [dealer1, dealer2],
       cars: [car1, car2, car3],
       invoices: [invoice1, invoice2],
-      mechanics: [mechanic1, mechanic2]
+      mechanics: [mechanic1, mechanic2],
+      services: [service1, service2, service3]
     }
   end
 
@@ -247,5 +248,113 @@ defmodule AssociationsTest do
     Enum.map([customer1, customer2], &Relations.load(&1, :cars))
 
     assert Garage.batches() == 3
+  end
+
+  test "loads a path of associations", %{
+    customers: [customer1, customer2],
+    mechanics: [mechanic1, mechanic2]
+  } do
+    assert Relations.load(customer1, [:cars, :mechanics]) == [mechanic1, mechanic2]
+    assert Relations.load(customer2, [:cars, :mechanics]) == []
+    assert Relations.load(%Customer{id: 3, name: "Ann"}, [:cars, :mechanics]) == []
+  end
+
+  test "loads a path of one association", %{
+    customers: [customer1, _customer2],
+    cars: [car1, car2, _car3]
+  } do
+    assert Relations.load(customer1, [:cars]) == [car1, car2]
+    assert Relations.load(car1, [:owner]) == customer1
+
+    assert Relations.load_many([car1, car2], [:owner]) == [
+             {car1, [customer1]},
+             {car2, [customer1]}
+           ]
+  end
+
+  test "returns a single record for a path of belongs_to associations", %{
+    customers: [customer1, customer2],
+    services: [service1, _service2, service3]
+  } do
+    assert Relations.load(service1, [:car, :owner]) == customer1
+    assert Relations.load(service3, [:car, :owner]) == customer1
+    assert Relations.load(%Service{id: 4, cost: 10, car_id: 3}, [:car, :owner]) == customer2
+    assert Relations.load(%Service{id: 4, cost: 10, car_id: nil}, [:car, :owner]) == nil
+    assert Relations.load(%Service{id: 4, cost: 10, car_id: 9}, [:car, :owner]) == nil
+  end
+
+  test "returns a list for a path holding an association other than belongs_to", %{
+    customers: [customer1, _customer2],
+    dealers: [dealer1, _dealer2]
+  } do
+    assert Relations.load(dealer1, [:cars, :owner]) == [customer1]
+  end
+
+  test "dedups the records a path converges on", %{
+    customers: [customer1, customer2],
+    cars: [_car1, _car2, car3],
+    mechanics: [mechanic1, mechanic2]
+  } do
+    Garage.put([%Service{id: 4, cost: 20, car_id: car3.id, mechanic_id: mechanic1.id}])
+
+    assert Relations.load_many([customer1, customer2], [:cars, :mechanics]) ==
+             [{customer1, [mechanic1, mechanic2]}, {customer2, [mechanic1]}]
+  end
+
+  test "loads a path for many records at once", %{
+    customers: [customer1, customer2],
+    mechanics: [mechanic1, mechanic2]
+  } do
+    stranger = %Customer{id: 3, name: "Ann"}
+
+    assert Relations.load_many([customer2, customer1, stranger], [:cars, :mechanics]) ==
+             [{customer2, []}, {customer1, [mechanic1, mechanic2]}, {stranger, []}]
+  end
+
+  test "searches once per hop of a path", %{customers: [customer1, customer2]} do
+    assert Garage.batches() == 0
+
+    Relations.load_many([customer1, customer2], [:cars, :mechanics])
+
+    assert Garage.batches() == 3
+  end
+
+  test "loads a path over records of different schemas at once", %{
+    customers: [customer1, _customer2],
+    dealers: [dealer1, _dealer2],
+    mechanics: [mechanic1, mechanic2]
+  } do
+    assert Relations.load_many([customer1, dealer1], [:cars, :mechanics]) ==
+             [{customer1, [mechanic1, mechanic2]}, {dealer1, [mechanic1, mechanic2]}]
+  end
+
+  test "raises for an association a schema along the path does not declare", %{
+    customers: [customer1, _customer2]
+  } do
+    message = "Garage.Car has no :licences association"
+
+    assert_raise ArgumentError, message, fn -> Relations.load(customer1, [:cars, :licences]) end
+
+    assert_raise ArgumentError, message, fn ->
+      Relations.load_many([customer1], [:cars, :licences])
+    end
+  end
+
+  test "raises for an empty path", %{customers: [customer1, _customer2]} do
+    message = "an association path must hold at least one association"
+
+    assert_raise ArgumentError, message, fn -> Relations.load(customer1, []) end
+    assert_raise ArgumentError, message, fn -> Relations.load_many([customer1], []) end
+  end
+
+  test "raises when a path of belongs_to associations finds more than one record", %{
+    customers: [customer1, _customer2],
+    services: [service1, _service2, _service3]
+  } do
+    Garage.put([%Customer{id: customer1.id, name: "John the second"}])
+
+    assert_raise RuntimeError,
+                 "the [:car, :owner] association of Garage.Service found 2 records",
+                 fn -> Relations.load(service1, [:car, :owner]) end
   end
 end

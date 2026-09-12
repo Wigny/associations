@@ -27,6 +27,11 @@ defmodule Garage.Relations do
     many_to_many :cars, Car, join_through: Service
   end
 
+  association Service do
+    belongs_to :car, Car
+    belongs_to :mechanic, Mechanic
+  end
+
   association Customer do
     has_many :cars, Car, foreign_key: :owner_id
   end

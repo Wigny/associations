@@ -30,6 +30,9 @@ defmodule Associations.Resolver do
   the next step. Walks may be of different lengths, so records of different schemas, and
   associations of different kinds, resolve in the same batches.
 
+  Records found by the same walk are deduplicated at every hop, so a walk that converges on a
+  record through more than one of the records before it holds that record once.
+
   Returns the records each walk ended on, in the order the walks were given.
   """
   @spec resolve(module(), [{struct(), [step()]}]) :: [[struct()]]
@@ -66,7 +69,7 @@ defmodule Associations.Resolver do
   defp advance({[], records}, _lookups, _results), do: {[], records}
 
   defp advance({[_step | steps], _records}, lookups, results) do
-    {steps, Enum.flat_map(lookups, &read(results, &1))}
+    {steps, lookups |> Enum.flat_map(&read(results, &1)) |> Enum.uniq()}
   end
 
   defp read(results, {target, search}), do: results |> Map.fetch!(target) |> Map.fetch!(search)

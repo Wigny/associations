@@ -42,6 +42,19 @@ defmodule Associations do
 
   The records it is given may be of different schemas, as above, as long as each of them declares
   the association.
+
+  Both functions take a path of associations as well as a single one, walking one association of
+  the records the one before it found, the way `get_in/2` walks a nested map. Every hop is
+  searched for in its own batch, no matter how many records reached it, and the records the last
+  hop found are returned without repeats.
+
+      Relations.load(person, [:cars, :dealer])
+      #=> [%Dealer{code: "AAA"}]
+
+  A path returns a single record only when every association along it is a `belongs_to`; one
+  `has_many` or `many_to_many` anywhere in it makes the result a list. The records the hops in
+  between found are not returned, so a path tells you which records it ended on, not which of the
+  records before them led there.
   """
 
   alias Associations.Resolver
@@ -79,13 +92,13 @@ defmodule Associations do
 
       @before_compile Associations
 
-      @doc "Loads the `name` association of `record`."
-      @spec load(struct, atom) :: struct | [struct] | nil
-      def load(record, name), do: Associations.load(__MODULE__, record, name)
+      @doc "Loads the association `path` of `record`, either one name or a list of them."
+      @spec load(struct, atom | [atom]) :: struct | [struct] | nil
+      def load(record, path), do: Associations.load(__MODULE__, record, path)
 
-      @doc "Loads the `name` association of every record, searching for all of them at once."
-      @spec load_many([struct], atom) :: [{struct, [struct]}]
-      def load_many(records, name), do: Associations.load_many(__MODULE__, records, name)
+      @doc "Loads the association `path` of every record, searching for all of them at once."
+      @spec load_many([struct], atom | [atom]) :: [{struct, [struct]}]
+      def load_many(records, path), do: Associations.load_many(__MODULE__, records, path)
     end
   end
 
@@ -239,27 +252,46 @@ defmodule Associations do
   end
 
   @doc false
-  def load(module, %schema{} = record, name) do
-    %{kind: kind, steps: steps} = definition!(module, schema, name)
+  def load(module, %schema{} = record, path) do
+    {kinds, steps} = walk!(module, schema, path)
     [results] = Resolver.resolve(module, [{record, steps}])
 
-    case kind do
-      :belongs_to -> one!(results, schema, name)
-      _kind -> results
+    if Enum.all?(kinds, &(&1 == :belongs_to)) do
+      one!(results, schema, path)
+    else
+      results
     end
   end
 
   @doc false
-  def load_many(module, records, name) when is_list(records) do
+  def load_many(module, records, path) when is_list(records) do
     walks =
       Enum.map(records, fn %schema{} = record ->
-        %{steps: steps} = definition!(module, schema, name)
+        {_kinds, steps} = walk!(module, schema, path)
 
         {record, steps}
       end)
 
     Enum.zip(records, Resolver.resolve(module, walks))
   end
+
+  defp walk!(_module, _schema, []) do
+    raise ArgumentError, "an association path must hold at least one association"
+  end
+
+  defp walk!(module, schema, path) when is_list(path) do
+    {kinds, steps, _schema} =
+      Enum.reduce(path, {[], [], schema}, fn name, {kinds, steps, schema} ->
+        %{kind: kind, steps: hops} = definition!(module, schema, name)
+        %{target: target} = List.last(hops)
+
+        {[kind | kinds], steps ++ hops, target}
+      end)
+
+    {kinds, steps}
+  end
+
+  defp walk!(module, schema, name), do: walk!(module, schema, [name])
 
   defp definition!(module, schema, name) do
     case Map.fetch(module.__definitions__(), {schema, name}) do
@@ -271,10 +303,10 @@ defmodule Associations do
     end
   end
 
-  defp one!([], _schema, _name), do: nil
-  defp one!([record], _schema, _name), do: record
+  defp one!([], _schema, _path), do: nil
+  defp one!([record], _schema, _path), do: record
 
-  defp one!(records, schema, name) do
-    raise "the #{inspect(name)} association of #{inspect(schema)} found #{length(records)} records"
+  defp one!(records, schema, path) do
+    raise "the #{inspect(path)} association of #{inspect(schema)} found #{length(records)} records"
   end
 end
