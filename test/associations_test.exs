@@ -3,12 +3,15 @@ defmodule AssociationsTest do
   doctest Associations
 
   alias Garage.Car
+  alias Garage.Compatibility
   alias Garage.Customer
   alias Garage.Dealer
   alias Garage.Invoice
   alias Garage.Mechanic
+  alias Garage.Part
   alias Garage.Relations
   alias Garage.Service
+  alias Garage.Usage
 
   setup do
     customer1 = %Customer{id: 1, name: "John"}
@@ -25,6 +28,15 @@ defmodule AssociationsTest do
     service1 = %Service{id: 1, cost: 80, car_id: car1.id, mechanic_id: mechanic1.id}
     service2 = %Service{id: 2, cost: 40, car_id: car1.id, mechanic_id: mechanic2.id}
     service3 = %Service{id: 3, cost: 60, car_id: car2.id, mechanic_id: mechanic1.id}
+    part1 = %Part{manufacturer_code: "BOS", part_number: "12", name: "Oil filter"}
+    part2 = %Part{manufacturer_code: "BOS", part_number: "34", name: "Spark plug"}
+    part3 = %Part{manufacturer_code: "DEN", part_number: "12", name: "Timing belt"}
+    usage1 = %Usage{service_id: 1, manufacturer_code: "BOS", part_number: "12", quantity: 1}
+    usage2 = %Usage{service_id: 1, manufacturer_code: "DEN", part_number: "12", quantity: 2}
+    usage3 = %Usage{service_id: 2, manufacturer_code: "BOS", part_number: "12", quantity: 1}
+    fits1 = %Compatibility{car_id: 1, manufacturer_code: "BOS", part_number: "12"}
+    fits2 = %Compatibility{car_id: 1, manufacturer_code: "DEN", part_number: "12"}
+    fits3 = %Compatibility{car_id: 2, manufacturer_code: "BOS", part_number: "12"}
 
     Garage.put([
       customer1,
@@ -40,7 +52,16 @@ defmodule AssociationsTest do
       mechanic2,
       service1,
       service2,
-      service3
+      service3,
+      part1,
+      part2,
+      part3,
+      usage1,
+      usage2,
+      usage3,
+      fits1,
+      fits2,
+      fits3
     ])
 
     %{
@@ -49,7 +70,9 @@ defmodule AssociationsTest do
       cars: [car1, car2, car3],
       invoices: [invoice1, invoice2],
       mechanics: [mechanic1, mechanic2],
-      services: [service1, service2, service3]
+      services: [service1, service2, service3],
+      parts: [part1, part2, part3],
+      usages: [usage1, usage2, usage3]
     }
   end
 
@@ -193,13 +216,76 @@ defmodule AssociationsTest do
     assert Garage.batches() == 2
   end
 
+  test "loads a belongs_to association keyed on more than one field", %{
+    parts: [part1, _part2, part3],
+    usages: [usage1, usage2, _usage3]
+  } do
+    stray = %Usage{service_id: 3, manufacturer_code: "BOS", part_number: "99", quantity: 1}
+
+    assert Relations.load(usage1, :part) == part1
+    assert Relations.load(usage2, :part) == part3
+    assert Relations.load(stray, :part) == nil
+  end
+
+  test "loads a has_many association keyed on more than one field", %{
+    parts: [part1, part2, part3],
+    usages: [usage1, usage2, usage3]
+  } do
+    assert Relations.load(part1, :usages) == [usage1, usage3]
+    assert Relations.load(part2, :usages) == []
+    assert Relations.load(part3, :usages) == [usage2]
+  end
+
+  test "loads a many_to_many association whose join keys hold more than one field", %{
+    cars: [car1, car2, car3],
+    parts: [part1, _part2, part3]
+  } do
+    assert Relations.load(car1, :compatible_parts) == [part1, part3]
+    assert Relations.load(car2, :compatible_parts) == [part1]
+    assert Relations.load(car3, :compatible_parts) == []
+  end
+
+  test "fetches every row a set of fields is searched by in a single call", %{
+    parts: [part1, _part2, part3]
+  } do
+    Relations.load_many([part1, part3], :usages)
+
+    assert Garage.calls() == [
+             {Usage, [:manufacturer_code, :part_number], [["BOS", "12"], ["DEN", "12"]]}
+           ]
+  end
+
+  test "raises for an association pairing a different number of fields" do
+    message =
+      ~s(the :part association of Garage.Usage pairs [:manufacturer_code, :part_number] ) <>
+        ~s(with [:part_number], which name a different number of fields)
+
+    assert_raise ArgumentError, message, fn ->
+      defmodule Broken do
+        use Associations
+
+        @impl true
+        def fetch(_schema, _fields, _values), do: []
+
+        association Usage do
+          belongs_to :part, Part,
+            foreign_key: [:manufacturer_code, :part_number],
+            references: [:part_number]
+        end
+      end
+    end
+  end
+
   test "fetches every value a field is searched by in a single call", %{
     customers: [customer1, customer2],
     dealers: [dealer1, _dealer2]
   } do
     Relations.load_many([customer1, customer2, dealer1], :cars)
 
-    assert Garage.calls() == [{Car, :owner_id, [1, 2]}, {Car, :dealer_code, ["AAA"]}]
+    assert Garage.calls() == [
+             {Car, [:owner_id], [[1], [2]]},
+             {Car, [:dealer_code], [["AAA"]]}
+           ]
   end
 
   test "finds nothing for a record whose key is nil", %{

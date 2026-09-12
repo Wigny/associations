@@ -10,8 +10,8 @@ defmodule Associations do
         use Associations
 
         @impl true
-        def fetch(schema, field, values) do
-          Garage.list_by(schema, field, values)
+        def fetch(schema, fields, values) do
+          Garage.list_by(schema, fields, values)
         end
 
         association Car do
@@ -60,34 +60,43 @@ defmodule Associations do
   alias Associations.Resolver
 
   @doc """
-  Fetches the records of `schema` whose `field` holds one of `values`.
+  Fetches the records of `schema` whose `fields` hold one of `values`.
 
   Every association of the module goes through this single callback, so it must handle each schema
   it may be asked for. It is asked for every value at once, so it is meant to be answered with one
   query, one request or one lookup, whatever the records come from.
 
+  `values` holds one row per record being searched for, each row holding a value for every field
+  `fields` names, in the same order. Matching the fields in the head fixes the shape of a row, so
+  a clause written that way can take it apart directly:
+
       @impl true
-      def fetch(Car, :owner_id, owner_ids) do
-        Garage.list_cars(owner_ids: owner_ids)
+      def fetch(Car, [:owner_id], values) do
+        Garage.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
       end
 
-      def fetch(Customer, :id, ids) do
-        Billing.get_customers(ids)
+      def fetch(Part, [:manufacturer_code, :part_number], values) do
+        Catalogue.list_parts(Enum.map(values, fn [code, number] -> {code, number} end))
       end
 
-  The field arrives as a name, so a source that takes the field it searches by can answer every
-  schema in a single clause instead.
+  A clause that leaves the fields open answers every schema at once, and zips them onto each row
+  to say which value belongs to which field:
 
-  The records are returned as a flat list, in any order between values and in the order they are
-  wanted within one; `load/2` and `load_many/2` group them by `field` themselves. A record that
-  matches none of `values` is ignored, so a source that can only answer more coarsely may return
-  more than it was asked for.
+      @impl true
+      def fetch(schema, fields, values) do
+        Garage.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
+      end
 
-  A batch of searches is grouped by the field it searches, so loading one association over records
-  of different schemas calls this once per field, each call holding every value that field is
-  searched by. The calls come in the order the records being loaded ask for them.
+  The records are returned as a flat list, in any order between rows and in the order they are
+  wanted within one; `load/2` and `load_many/2` group them by `fields` themselves. A record
+  matching none of the rows asked for is ignored, so a source that can only answer more coarsely,
+  by each field separately, may return more than it was asked for.
+
+  A batch of searches is grouped by the fields it searches, so loading one association over
+  records of different schemas calls this once per set of fields, each call holding every row
+  those fields are searched by. The calls come in the order the records being loaded ask for them.
   """
-  @callback fetch(schema :: module(), field :: atom(), values :: [term()]) :: [struct()]
+  @callback fetch(schema :: module(), fields :: [atom()], values :: [[term()]]) :: [struct()]
 
   defmacro __using__(_opts) do
     quote do
@@ -157,6 +166,15 @@ defmodule Associations do
       Defaults to `name` suffixed with `_id`, so `belongs_to :owner, Person` reads `:owner_id`.
 
     * `:references` - the field of `schema` the foreign key points at. Defaults to `:id`.
+
+  Both take a list of fields as well as a single one, for a `schema` identified by more than one,
+  and are then paired in the order they are given.
+
+      association Usage do
+        belongs_to :part, Part,
+          foreign_key: [:manufacturer_code, :part_number],
+          references: [:manufacturer_code, :part_number]
+      end
   """
   @spec belongs_to(atom(), module(), keyword()) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
@@ -185,6 +203,15 @@ defmodule Associations do
 
     * `:references` - the field of the enclosing schema the foreign key points at. Defaults to
       `:id`.
+
+  Both take a list of fields as well as a single one, for an enclosing schema identified by more
+  than one, and are then paired in the order they are given.
+
+      association Part do
+        has_many :usages, Usage,
+          foreign_key: [:manufacturer_code, :part_number],
+          references: [:manufacturer_code, :part_number]
+      end
   """
   @spec has_many(atom(), module(), keyword()) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
@@ -212,7 +239,20 @@ defmodule Associations do
     * `:join_keys` - the two pairs of fields the join schema is searched by, each pairing a field
       of the join schema with the field it points at. Defaults to the module name of each side,
       underscored and suffixed with `_id`, pointing at `:id`, so the declaration above is the same
-      as `join_keys: [car_id: :id, mechanic_id: :id]`.
+      as `join_keys: [car_id: :id, mechanic_id: :id]`. Either side of a pair takes a list of
+      fields as well as a single one, for a schema identified by more than one.
+
+      The first pair is always the one pointing at the enclosing schema, so a composite side
+      cannot be written with the keyword syntax unless it is the second.
+
+          association Car do
+            many_to_many :compatible_parts, Part,
+              join_through: Compatibility,
+              join_keys: [
+                {:car_id, :id},
+                {[:manufacturer_code, :part_number], [:manufacturer_code, :part_number]}
+              ]
+          end
   """
   @spec many_to_many(atom(), module(), keyword()) :: Macro.t()
   defmacro many_to_many(name, schema, opts) do
@@ -236,14 +276,14 @@ defmodule Associations do
     from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
     to = Keyword.get(opts, :references, :id)
 
-    {{schema, name}, %{kind: :belongs_to, steps: [Resolver.step(target, from, to)]}}
+    {{schema, name}, %{kind: :belongs_to, steps: [step!(schema, name, target, from, to)]}}
   end
 
   defp define({schema, :has_many, name, target, opts}) do
     from = Keyword.get(opts, :references, :id)
     to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-    {{schema, name}, %{kind: :has_many, steps: [Resolver.step(target, from, to)]}}
+    {{schema, name}, %{kind: :has_many, steps: [step!(schema, name, target, from, to)]}}
   end
 
   defp define({schema, :many_to_many, name, target, opts}) do
@@ -255,11 +295,24 @@ defmodule Associations do
       end)
 
     steps = [
-      Resolver.step(join, owner_reference, owner_key),
-      Resolver.step(target, target_key, target_reference)
+      step!(schema, name, join, owner_reference, owner_key),
+      step!(schema, name, target, target_key, target_reference)
     ]
 
     {{schema, name}, %{kind: :many_to_many, steps: steps}}
+  end
+
+  defp step!(schema, name, target, from, to) do
+    from = List.wrap(from)
+    to = List.wrap(to)
+
+    if length(from) != length(to) do
+      raise ArgumentError,
+            "the #{inspect(name)} association of #{inspect(schema)} pairs #{inspect(from)} " <>
+              "with #{inspect(to)}, which name a different number of fields"
+    end
+
+    Resolver.step(target, from, to)
   end
 
   defp default_foreign_key(schema) do

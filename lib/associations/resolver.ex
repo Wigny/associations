@@ -4,18 +4,22 @@ defmodule Associations.Resolver do
   @typedoc """
   One hop of an association.
 
-  `:target` is the schema to search, `:from` the field the value is read off the record at hand,
-  and `:to` the field of `:target` that value is matched against.
+  `:target` is the schema to search, `:from` the fields the values are read off the record at
+  hand, and `:to` the fields of `:target` those values are matched against, one for one.
   """
-  @type step :: %{target: module(), from: atom(), to: atom()}
+  @type step :: %{target: module(), from: [atom()], to: [atom()]}
 
-  @typedoc "A search of one schema by one field and value, such as `{Car, :owner_id, 1}`."
-  @type lookup :: {target :: module(), field :: atom(), value :: term()}
+  @typedoc """
+  A search of one schema by its fields and their values, such as `{Car, [:owner_id], [1]}`.
+  """
+  @type lookup :: {target :: module(), fields :: [atom()], values :: [term()]}
 
   @doc """
   Builds the step that reads `from` off a record and searches `target` by `to`.
+
+  Either may name more than one field, and the two are paired in the order they are given.
   """
-  @spec step(module(), atom(), atom()) :: step()
+  @spec step(module(), [atom()], [atom()]) :: step()
   def step(target, from, to), do: %{target: target, from: from, to: to}
 
   @doc """
@@ -54,23 +58,25 @@ defmodule Associations.Resolver do
   defp pending_lookups({[], _records}), do: []
 
   defp lookup(%{target: target, from: from, to: to}, record) do
-    {target, to, Map.fetch!(record, from)}
+    {target, to, values(record, from)}
   end
 
   defp search(module, lookups) do
-    values = Enum.group_by(lookups, &batch/1, fn {_target, _field, value} -> value end)
+    batches = Enum.group_by(lookups, &batch/1, fn {_target, _fields, values} -> values end)
 
     lookups
     |> Enum.map(&batch/1)
     |> Enum.uniq()
-    |> Map.new(fn {target, field} = batch ->
-      records = module.fetch(target, field, values |> Map.fetch!(batch) |> Enum.uniq())
+    |> Map.new(fn {target, fields} = batch ->
+      records = module.fetch(target, fields, batches |> Map.fetch!(batch) |> Enum.uniq())
 
-      {batch, Enum.group_by(records, &Map.fetch!(&1, field))}
+      {batch, Enum.group_by(records, &values(&1, fields))}
     end)
   end
 
-  defp batch({target, field, _value}), do: {target, field}
+  defp batch({target, fields, _values}), do: {target, fields}
+
+  defp values(record, fields), do: Enum.map(fields, &Map.fetch!(record, &1))
 
   defp advance({[], records}, _lookups, _results), do: {[], records}
 
@@ -78,7 +84,7 @@ defmodule Associations.Resolver do
     {steps, lookups |> Enum.flat_map(&read(results, &1)) |> Enum.uniq()}
   end
 
-  defp read(results, {target, field, value}) do
-    results |> Map.fetch!({target, field}) |> Map.get(value, [])
+  defp read(results, {target, fields, values}) do
+    results |> Map.fetch!({target, fields}) |> Map.get(values, [])
   end
 end

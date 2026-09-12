@@ -9,8 +9,8 @@ defmodule Relations do
   use Associations
 
   @impl true
-  def fetch(schema, field, values) do
-    Garage.list_by(schema, field, values)
+  def fetch(schema, fields, values) do
+    Garage.list_by(schema, fields, values)
   end
 
   association Car do
@@ -61,22 +61,31 @@ A path returns a single record only when every association along it is a `belong
 
 ## Fetching
 
-Every association goes through the single `fetch/3` callback. It receives the schema being loaded, the field to search it by, and every value that field is searched by in the batch, and returns a flat list of records. It is asked for all the values at once, so it is meant to be answered with one query, one request or one lookup, whatever the records come from:
+Every association goes through the single `fetch/3` callback. It receives the schema being loaded, the fields to search it by, and one row of values per record being searched for, and returns a flat list of records. It is asked for every row at once, so it is meant to be answered with one query, one request or one lookup, whatever the records come from:
 
 ```elixir
 @impl true
-def fetch(Car, :owner_id, owner_ids) do
-  Garage.list_cars(owner_ids: owner_ids)
+def fetch(Car, [:owner_id], values) do
+  Garage.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
 end
 
-def fetch(Customer, :id, ids) do
-  Billing.get_customers(ids)
+def fetch(Part, [:manufacturer_code, :part_number], values) do
+  Catalogue.list_parts(Enum.map(values, fn [code, number] -> {code, number} end))
 end
 ```
 
-The callback has to handle each schema it may be asked for, but nothing more: the records come back as a plain list and `load/2` groups them by `field` itself, so a record matching none of the values is ignored and a source that can only answer more coarsely may return more than it was asked for.
+Matching the fields in the head fixes the shape of a row, as above. A clause that leaves them open answers every schema at once, and zips them onto each row to say which value belongs to which field:
 
-A batch is grouped by the field it searches, so loading one association over records of different schemas calls `fetch/3` once per field, each call holding every value that field is searched by.
+```elixir
+@impl true
+def fetch(schema, fields, values) do
+  Garage.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
+end
+```
+
+The callback has to handle each schema it may be asked for, but nothing more: the records come back as a plain list and `load/2` groups them by `fields` itself, so a record matching none of the rows is ignored and a source that can only answer more coarsely may return more than it was asked for.
+
+A batch is grouped by the fields it searches, so loading one association over records of different schemas calls `fetch/3` once per set of fields, each call holding every row those fields are searched by.
 
 ## Installation
 

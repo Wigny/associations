@@ -9,14 +9,14 @@ defmodule Garage do
     :ets.insert(table, {:records, records(table) ++ records})
   end
 
-  @doc "Lists the records whose `field` holds one of `values`, in the order they were put in."
-  def list_by(schema, field, values) do
+  @doc "Lists the records whose `fields` hold one of `values`, in the order they were put in."
+  def list_by(schema, fields, values) do
     table = ensure_table_started()
 
-    record_call(table, {schema, field, values})
+    record_call(table, {schema, fields, values})
 
     Enum.filter(records(table), fn record ->
-      is_struct(record, schema) and Map.fetch!(record, field) in values
+      is_struct(record, schema) and Enum.map(fields, &Map.fetch!(record, &1)) in values
     end)
   end
 
