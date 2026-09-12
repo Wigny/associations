@@ -280,12 +280,47 @@ defmodule AssociationsTest do
     customers: [customer1, customer2],
     dealers: [dealer1, _dealer2]
   } do
-    Relations.load_many([customer1, customer2, dealer1], :cars)
+    Relations.load_many([customer1, customer2, dealer1], :cars, async: false)
 
     assert Garage.calls() == [
              {Car, [:owner_id], [[1], [2]]},
              {Car, [:dealer_code], [["AAA"]]}
            ]
+  end
+
+  test "fetches the groups of a hop in a process of their own", %{
+    customers: [customer1, _customer2],
+    dealers: [dealer1, _dealer2]
+  } do
+    Relations.load_many([customer1, dealer1], :cars)
+
+    assert [pid1, pid2] = Garage.pids()
+    assert pid1 != self() and pid2 != self()
+  end
+
+  test "fetches in the process asking for it when async is false", %{
+    customers: [customer1, _customer2],
+    dealers: [dealer1, _dealer2]
+  } do
+    Relations.load_many([customer1, dealer1], :cars, async: false)
+
+    assert Garage.pids() == [self()]
+  end
+
+  test "raises in the caller whatever the loader raised", %{cars: [car1, _car2, _car3]} do
+    defmodule Raising do
+      use Associations
+
+      @impl true
+      def fetch(_schema, _fields, _values), do: raise("no source")
+
+      association Car do
+        belongs_to :owner, Customer
+      end
+    end
+
+    assert_raise RuntimeError, "no source", fn -> Raising.load(car1, :owner) end
+    assert_raise RuntimeError, "no source", fn -> Raising.load(car1, :owner, async: false) end
   end
 
   test "finds nothing for a record whose key is nil", %{

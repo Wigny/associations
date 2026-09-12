@@ -94,7 +94,15 @@ defmodule Associations do
 
   A batch of searches is grouped by the fields it searches, so loading one association over
   records of different schemas calls this once per set of fields, each call holding every row
-  those fields are searched by. The calls come in the order the records being loaded ask for them.
+  those fields are searched by.
+
+  Those calls run concurrently, each in its own task, so this must be safe to run in parallel and
+  the order the calls are made in is not defined. A task does not inherit what the process calling
+  `load/2` holds, which matters when the records come from a connection checked out to it: an
+  `Ecto.Repo` reads its sandbox connection through `$callers`, which a task does carry, but a
+  transaction is bound to the process that opened it, and a fetch running beside it is outside it.
+  Pass `async: false` to `load/3` or `load_many/3` there, and the calls are made in turn, in the
+  process asking for them.
   """
   @callback fetch(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
 
@@ -116,13 +124,30 @@ defmodule Associations do
 
       @before_compile Associations
 
-      @doc "Loads the association `path` of `record`, either one name or a list of them."
-      @spec load(struct, atom | [atom]) :: struct | [struct] | nil
-      def load(record, path), do: Associations.load(__MODULE__, record, path)
+      @doc """
+      Loads the association `path` of `record`, either one name or a list of them.
 
-      @doc "Loads the association `path` of every record, searching for all of them at once."
-      @spec load_many([struct], atom | [atom]) :: [{struct, [struct]}]
-      def load_many(records, path), do: Associations.load_many(__MODULE__, records, path)
+      ## Options
+
+        * `:async` - whether the searches of a single hop are run concurrently, each in its own
+          task. Defaults to `true`. Pass `false` where `c:Associations.fetch/3` has to run in the
+          process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the
+          process that opened it and which a task therefore runs outside of.
+      """
+      @spec load(struct, atom | [atom], async: boolean) :: struct | [struct] | nil
+      def load(record, path, opts \\ []) do
+        Associations.load(__MODULE__, record, path, opts)
+      end
+
+      @doc """
+      Loads the association `path` of every record, searching for all of them at once.
+
+      Takes the same options as `load/3`.
+      """
+      @spec load_many([struct], atom | [atom], async: boolean) :: [{struct, [struct]}]
+      def load_many(records, path, opts \\ []) do
+        Associations.load_many(__MODULE__, records, path, opts)
+      end
     end
   end
 
@@ -320,9 +345,9 @@ defmodule Associations do
   end
 
   @doc false
-  def load(module, %schema{} = record, path) do
+  def load(module, %schema{} = record, path, opts) do
     {kinds, steps} = walk!(module, schema, path)
-    [results] = Resolver.resolve(module, [{record, steps}])
+    [results] = Resolver.resolve(module, [{record, steps}], opts)
 
     if Enum.all?(kinds, &(&1 == :belongs_to)) do
       one!(results, schema, path)
@@ -332,7 +357,7 @@ defmodule Associations do
   end
 
   @doc false
-  def load_many(module, records, path) when is_list(records) do
+  def load_many(module, records, path, opts) when is_list(records) do
     walks =
       Enum.map(records, fn %schema{} = record ->
         {_kinds, steps} = walk!(module, schema, path)
@@ -340,7 +365,7 @@ defmodule Associations do
         {record, steps}
       end)
 
-    Enum.zip(records, Resolver.resolve(module, walks))
+    Enum.zip(records, Resolver.resolve(module, walks, opts))
   end
 
   defp walk!(_module, _schema, []) do

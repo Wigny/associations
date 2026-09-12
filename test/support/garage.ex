@@ -21,12 +21,10 @@ defmodule Garage do
   end
 
   @doc "The calls the loader made, in the order it made them."
-  def calls do
-    @table
-    |> :ets.match_object({{:call, :_}, :_})
-    |> Enum.sort()
-    |> Enum.map(fn {_key, call} -> call end)
-  end
+  def calls, do: Enum.map(recorded(), fn {_pid, call} -> call end)
+
+  @doc "The processes the loader was called from, without repeats."
+  def pids, do: recorded() |> Enum.map(fn {pid, _call} -> pid end) |> Enum.uniq()
 
   @doc "How many times the loader was called, to tell batched searches from repeated ones."
   def batches, do: length(calls())
@@ -39,7 +37,14 @@ defmodule Garage do
   defp record_call(table, call) do
     index = :ets.update_counter(table, :calls, {2, 1}, {:calls, 0})
 
-    :ets.insert(table, {{:call, index}, call})
+    :ets.insert(table, {{:call, index}, self(), call})
+  end
+
+  defp recorded do
+    @table
+    |> :ets.match_object({{:call, :_}, :_, :_})
+    |> Enum.sort()
+    |> Enum.map(fn {_key, pid, call} -> {pid, call} end)
   end
 
   defp records(table) do

@@ -35,22 +35,25 @@ defmodule Associations.Resolver do
   Records found by the same walk are deduplicated at every hop, so a walk that converges on a
   record through more than one of the records before it holds that record once.
 
+  The groups of a single hop are fetched concurrently, each in its own task, unless `:async` is
+  given as `false`.
+
   Returns the records each walk ended on, in the order the walks were given.
   """
-  @spec resolve(module, [{struct, [step]}]) :: [[struct]]
-  def resolve(module, walks) do
-    hop(module, Enum.map(walks, fn {record, steps} -> {steps, [record]} end))
+  @spec resolve(module, [{struct, [step]}], async: boolean) :: [[struct]]
+  def resolve(module, walks, opts) do
+    hop(module, Enum.map(walks, fn {record, steps} -> {steps, [record]} end), opts)
   end
 
-  defp hop(module, walks) do
+  defp hop(module, walks, opts) do
     lookups = Enum.map(walks, &pending_lookups/1)
 
     if Enum.all?(lookups, &Enum.empty?/1) do
       Enum.map(walks, fn {_steps, records} -> records end)
     else
-      results = search(module, Enum.concat(lookups))
+      results = search(module, Enum.concat(lookups), opts)
 
-      hop(module, Enum.zip_with(walks, lookups, &advance(&1, &2, results)))
+      hop(module, Enum.zip_with(walks, lookups, &advance(&1, &2, results)), opts)
     end
   end
 
@@ -61,18 +64,36 @@ defmodule Associations.Resolver do
     {target, to, values(record, from)}
   end
 
-  defp search(module, lookups) do
-    batches = Enum.group_by(lookups, &batch/1, fn {_target, _fields, values} -> values end)
+  defp search(module, lookups, opts) do
+    rows = Enum.group_by(lookups, &batch/1, fn {_target, _fields, values} -> values end)
+    batches = lookups |> Enum.map(&batch/1) |> Enum.uniq()
 
-    lookups
-    |> Enum.map(&batch/1)
-    |> Enum.uniq()
-    |> Map.new(fn {target, fields} = batch ->
-      records = module.fetch(target, fields, batches |> Map.fetch!(batch) |> Enum.uniq())
-
-      {batch, Enum.group_by(records, &values(&1, fields))}
+    batches
+    |> stream(module, rows, opts)
+    |> Enum.zip_with(batches, fn result, {_target, fields} = batch ->
+      {batch, Enum.group_by(unwrap!(result), &values(&1, fields))}
     end)
+    |> Map.new()
   end
+
+  defp stream(batches, module, rows, opts) do
+    fetch = &fetch(module, &1, Map.fetch!(rows, &1))
+
+    if Keyword.get(opts, :async, true) do
+      Task.async_stream(batches, fetch, timeout: :infinity)
+    else
+      Enum.map(batches, &{:ok, fetch.(&1)})
+    end
+  end
+
+  defp fetch(module, {target, fields}, rows) do
+    {:ok, module.fetch(target, fields, Enum.uniq(rows))}
+  catch
+    kind, reason -> {kind, reason, __STACKTRACE__}
+  end
+
+  defp unwrap!({:ok, {:ok, records}}), do: records
+  defp unwrap!({:ok, {kind, reason, stacktrace}}), do: :erlang.raise(kind, reason, stacktrace)
 
   defp batch({target, fields, _values}), do: {target, fields}
 
