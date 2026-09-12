@@ -1,5 +1,5 @@
 defmodule Garage.Invoice do
   @moduledoc false
 
-  defstruct [:id, :total, :person_id]
+  defstruct [:id, :total, :customer_id]
 end

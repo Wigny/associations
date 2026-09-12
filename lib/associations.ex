@@ -30,7 +30,8 @@ defmodule Associations do
       #=> %Person{id: 1}
 
   A `belongs_to` association returns a single record, or `nil` when none matches. A `has_many`
-  association returns a list.
+  association returns a list, and so does a `many_to_many` one, which searches the join schema
+  before the associated one.
 
   `load_many/2` searches for many records at once, which is what keeps loading an association
   over a list from querying once per record. It returns a `{record, records}` pair per record,
@@ -64,7 +65,14 @@ defmodule Associations do
   defmacro __using__(_opts) do
     quote do
       import Associations,
-        only: [association: 2, belongs_to: 2, belongs_to: 3, has_many: 2, has_many: 3]
+        only: [
+          association: 2,
+          belongs_to: 2,
+          belongs_to: 3,
+          has_many: 2,
+          has_many: 3,
+          many_to_many: 3
+        ]
 
       @behaviour Associations
 
@@ -96,15 +104,30 @@ defmodule Associations do
     from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
     to = Keyword.get(opts, :references, :id)
 
-    {{schema, name}, %{kind: :belongs_to, target: target, from: from, to: to}}
+    {{schema, name}, %{kind: :belongs_to, steps: [step(target, from, to)]}}
   end
 
   defp define({schema, :has_many, name, target, opts}) do
     from = Keyword.get(opts, :references, :id)
     to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-    {{schema, name}, %{kind: :has_many, target: target, from: from, to: to}}
+    {{schema, name}, %{kind: :has_many, steps: [step(target, from, to)]}}
   end
+
+  defp define({schema, :many_to_many, name, target, opts}) do
+    join = Keyword.fetch!(opts, :join_through)
+
+    [{to, from}, {join_from, join_to}] =
+      Keyword.get_lazy(opts, :join_keys, fn ->
+        [{default_foreign_key(schema), :id}, {default_foreign_key(target), :id}]
+      end)
+
+    steps = [step(join, from, to), step(target, join_from, join_to)]
+
+    {{schema, name}, %{kind: :many_to_many, steps: steps}}
+  end
+
+  defp step(target, from, to), do: %{target: target, from: from, to: to}
 
   defp default_foreign_key(schema) do
     :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
@@ -112,12 +135,12 @@ defmodule Associations do
 
   @doc false
   def load(module, %schema{} = record, name) do
-    definition = definition!(module, schema, name)
-    [results] = fetch_all(module, [lookup(definition, record)])
+    %{kind: kind, steps: steps} = definition!(module, schema, name)
+    [results] = walk(module, [{steps, [record]}])
 
-    case definition do
-      %{kind: :belongs_to} -> one!(results, schema, name)
-      %{kind: :has_many} -> results
+    case kind do
+      :belongs_to -> one!(results, schema, name)
+      _kind -> results
     end
   end
 
@@ -130,13 +153,42 @@ defmodule Associations do
 
   @doc false
   def load_many(module, records, name) when is_list(records) do
-    lookups =
+    walks =
       Enum.map(records, fn %schema{} = record ->
-        module |> definition!(schema, name) |> lookup(record)
+        %{steps: steps} = definition!(module, schema, name)
+
+        {steps, [record]}
       end)
 
-    Enum.zip(records, fetch_all(module, lookups))
+    Enum.zip(records, walk(module, walks))
   end
+
+  defp walk(module, walks) do
+    Dataloader.new()
+    |> Dataloader.add_source(@source, Dataloader.KV.new(&module.fetch/2))
+    |> hop(walks)
+  end
+
+  defp hop(loader, walks) do
+    case Enum.flat_map(walks, &lookups/1) do
+      [] ->
+        Enum.map(walks, fn {_steps, records} -> records end)
+
+      lookups ->
+        loader = run(loader, lookups)
+
+        hop(loader, Enum.map(walks, &advance(&1, loader)))
+    end
+  end
+
+  defp lookups({[step | _steps], records}), do: Enum.map(records, &lookup(step, &1))
+  defp lookups({[], _records}), do: []
+
+  defp advance({[step | steps], records}, loader) do
+    {steps, Enum.flat_map(records, fn record -> get(loader, lookup(step, record)) end)}
+  end
+
+  defp advance({[], records}, _loader), do: {[], records}
 
   defp lookup(%{target: target, from: from, to: to}, record) do
     {target, %{to => Map.fetch!(record, from)}}
@@ -152,25 +204,22 @@ defmodule Associations do
     end
   end
 
-  defp fetch_all(module, lookups) do
-    loader = Dataloader.add_source(Dataloader.new(), @source, Dataloader.KV.new(&module.fetch/2))
-
-    loader =
-      lookups
-      |> Enum.group_by(fn {target, _search} -> target end, fn {_target, search} -> search end)
-      |> Enum.reduce(loader, fn {target, searches}, loader ->
-        Dataloader.load_many(loader, @source, target, searches)
-      end)
-      |> Dataloader.run()
-
-    Enum.map(lookups, fn {target, search} -> Dataloader.get(loader, @source, target, search) end)
+  defp run(loader, lookups) do
+    lookups
+    |> Enum.group_by(fn {target, _search} -> target end, fn {_target, search} -> search end)
+    |> Enum.reduce(loader, fn {target, searches}, loader ->
+      Dataloader.load_many(loader, @source, target, searches)
+    end)
+    |> Dataloader.run()
   end
+
+  defp get(loader, {target, search}), do: Dataloader.get(loader, @source, target, search)
 
   @doc """
   Declares the associations of `schema`.
 
-  The block holds `belongs_to/3` and `has_many/3` declarations, all of them read from a `schema`
-  struct.
+  The block holds `belongs_to/3`, `has_many/3` and `many_to_many/3` declarations, all of them read
+  from a `schema` struct.
 
       association Car do
         belongs_to :owner, Person
@@ -239,6 +288,34 @@ defmodule Associations do
   defmacro has_many(name, schema, opts \\ []) do
     quote do
       @declarations {@association_schema, :has_many, unquote(name), unquote(schema),
+                     unquote(opts)}
+    end
+  end
+
+  @doc """
+  Declares that the enclosing schema and `schema` point at each other through a join schema.
+
+  `load/2` reads the primary key off the struct and searches the join schema by the foreign key
+  pointing at it, then searches `schema` for the records those join records point at, returning a
+  list. The two searches are two separate batches.
+
+      association Car do
+        many_to_many :mechanics, Mechanic, join_through: Service
+      end
+
+  ## Options
+
+    * `:join_through` - the schema holding the foreign keys of both sides. Required.
+
+    * `:join_keys` - the two pairs of fields the join schema is searched by, each pairing a field
+      of the join schema with the field it points at. Defaults to the module name of each side,
+      underscored and suffixed with `_id`, pointing at `:id`, so the declaration above is the same
+      as `join_keys: [car_id: :id, mechanic_id: :id]`.
+  """
+  @spec many_to_many(atom(), module(), keyword()) :: Macro.t()
+  defmacro many_to_many(name, schema, opts) do
+    quote do
+      @declarations {@association_schema, :many_to_many, unquote(name), unquote(schema),
                      unquote(opts)}
     end
   end

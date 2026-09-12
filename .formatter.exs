@@ -1,11 +1,11 @@
 # Used by "mix format"
 
 exported_locals_without_parens = [
-  loader: 1,
   belongs_to: 2,
   belongs_to: 3,
   has_many: 2,
-  has_many: 3
+  has_many: 3,
+  many_to_many: 3
 ]
 
 [
