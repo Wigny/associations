@@ -5,6 +5,7 @@ defmodule Garage.Relations do
 
   alias Garage.Car
   alias Garage.Dealer
+  alias Garage.Invoice
   alias Garage.Person
 
   loader fn schema, searches ->
@@ -20,6 +21,10 @@ defmodule Garage.Relations do
 
   association Person do
     has_many :cars, Car, foreign_key: :owner_id
+  end
+
+  association Person do
+    has_many :invoices, Invoice
   end
 
   association Dealer do

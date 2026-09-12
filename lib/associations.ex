@@ -97,9 +97,16 @@ defmodule Associations do
     [{^record, results}] = load_many(module, [record], name)
 
     case definition!(module, schema, name) do
-      %{kind: :belongs_to} -> List.first(results)
+      %{kind: :belongs_to} -> one!(results, schema, name)
       %{kind: :has_many} -> results
     end
+  end
+
+  defp one!([], _schema, _name), do: nil
+  defp one!([record], _schema, _name), do: record
+
+  defp one!(records, schema, name) do
+    raise "the #{inspect(name)} association of #{inspect(schema)} found #{length(records)} records"
   end
 
   @doc false
