@@ -89,90 +89,6 @@ defmodule Associations do
     end
   end
 
-  defmacro __before_compile__(env) do
-    declarations = Module.get_attribute(env.module, :declarations)
-    definitions = Map.new(declarations, &define/1)
-
-    quote do
-      @doc false
-      def __definitions__, do: unquote(Macro.escape(definitions))
-    end
-  end
-
-  defp define({schema, :belongs_to, name, target, opts}) do
-    from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
-    to = Keyword.get(opts, :references, :id)
-
-    {{schema, name}, %{kind: :belongs_to, steps: [Resolver.step(target, from, to)]}}
-  end
-
-  defp define({schema, :has_many, name, target, opts}) do
-    from = Keyword.get(opts, :references, :id)
-    to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
-
-    {{schema, name}, %{kind: :has_many, steps: [Resolver.step(target, from, to)]}}
-  end
-
-  defp define({schema, :many_to_many, name, target, opts}) do
-    join = Keyword.fetch!(opts, :join_through)
-
-    [{owner_key, owner_reference}, {target_key, target_reference}] =
-      Keyword.get_lazy(opts, :join_keys, fn ->
-        [{default_foreign_key(schema), :id}, {default_foreign_key(target), :id}]
-      end)
-
-    steps = [
-      Resolver.step(join, owner_reference, owner_key),
-      Resolver.step(target, target_key, target_reference)
-    ]
-
-    {{schema, name}, %{kind: :many_to_many, steps: steps}}
-  end
-
-  defp default_foreign_key(schema) do
-    :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
-  end
-
-  @doc false
-  def load(module, %schema{} = record, name) do
-    %{kind: kind, steps: steps} = definition!(module, schema, name)
-    [results] = Resolver.resolve(module, [{record, steps}])
-
-    case kind do
-      :belongs_to -> one!(results, schema, name)
-      _kind -> results
-    end
-  end
-
-  defp one!([], _schema, _name), do: nil
-  defp one!([record], _schema, _name), do: record
-
-  defp one!(records, schema, name) do
-    raise "the #{inspect(name)} association of #{inspect(schema)} found #{length(records)} records"
-  end
-
-  @doc false
-  def load_many(module, records, name) when is_list(records) do
-    walks =
-      Enum.map(records, fn %schema{} = record ->
-        %{steps: steps} = definition!(module, schema, name)
-
-        {record, steps}
-      end)
-
-    Enum.zip(records, Resolver.resolve(module, walks))
-  end
-
-  defp definition!(module, schema, name) do
-    case Map.fetch(module.__definitions__(), {schema, name}) do
-      {:ok, definition} ->
-        definition
-
-      :error ->
-        raise ArgumentError, "#{inspect(schema)} has no #{inspect(name)} association"
-    end
-  end
-
   @doc """
   Declares the associations of `schema`.
 
@@ -276,5 +192,89 @@ defmodule Associations do
       @declarations {@association_schema, :many_to_many, unquote(name), unquote(schema),
                      unquote(opts)}
     end
+  end
+
+  defmacro __before_compile__(env) do
+    declarations = Module.get_attribute(env.module, :declarations)
+    definitions = Map.new(declarations, &define/1)
+
+    quote do
+      @doc false
+      def __definitions__, do: unquote(Macro.escape(definitions))
+    end
+  end
+
+  defp define({schema, :belongs_to, name, target, opts}) do
+    from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
+    to = Keyword.get(opts, :references, :id)
+
+    {{schema, name}, %{kind: :belongs_to, steps: [Resolver.step(target, from, to)]}}
+  end
+
+  defp define({schema, :has_many, name, target, opts}) do
+    from = Keyword.get(opts, :references, :id)
+    to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
+
+    {{schema, name}, %{kind: :has_many, steps: [Resolver.step(target, from, to)]}}
+  end
+
+  defp define({schema, :many_to_many, name, target, opts}) do
+    join = Keyword.fetch!(opts, :join_through)
+
+    [{owner_key, owner_reference}, {target_key, target_reference}] =
+      Keyword.get_lazy(opts, :join_keys, fn ->
+        [{default_foreign_key(schema), :id}, {default_foreign_key(target), :id}]
+      end)
+
+    steps = [
+      Resolver.step(join, owner_reference, owner_key),
+      Resolver.step(target, target_key, target_reference)
+    ]
+
+    {{schema, name}, %{kind: :many_to_many, steps: steps}}
+  end
+
+  defp default_foreign_key(schema) do
+    :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
+  end
+
+  @doc false
+  def load(module, %schema{} = record, name) do
+    %{kind: kind, steps: steps} = definition!(module, schema, name)
+    [results] = Resolver.resolve(module, [{record, steps}])
+
+    case kind do
+      :belongs_to -> one!(results, schema, name)
+      _kind -> results
+    end
+  end
+
+  @doc false
+  def load_many(module, records, name) when is_list(records) do
+    walks =
+      Enum.map(records, fn %schema{} = record ->
+        %{steps: steps} = definition!(module, schema, name)
+
+        {record, steps}
+      end)
+
+    Enum.zip(records, Resolver.resolve(module, walks))
+  end
+
+  defp definition!(module, schema, name) do
+    case Map.fetch(module.__definitions__(), {schema, name}) do
+      {:ok, definition} ->
+        definition
+
+      :error ->
+        raise ArgumentError, "#{inspect(schema)} has no #{inspect(name)} association"
+    end
+  end
+
+  defp one!([], _schema, _name), do: nil
+  defp one!([record], _schema, _name), do: record
+
+  defp one!(records, schema, name) do
+    raise "the #{inspect(name)} association of #{inspect(schema)} found #{length(records)} records"
   end
 end
