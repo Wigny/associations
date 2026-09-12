@@ -24,7 +24,7 @@ defmodule Associations.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md"],
+      extras: ["README.md", "guides/example.livemd"],
       source_ref: "v#{@version}"
     ]
   end

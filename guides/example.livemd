@@ -1,0 +1,1690 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Example
+
+```elixir
+Mix.install([
+  {:associations, github: "Wigny/associations"},
+  {:req, "~> 0.7"}
+])
+```
+
+## The data source
+
+[JSONPlaceholder](https://jsonplaceholder.typicode.com) serves users, the posts they wrote and the comments those posts received, over three endpoints that filter by query parameter. Each endpoint answers a whole set of values at once, `/comments?postId=1&postId=2` returning the comments of both posts, which is what lets every search below be a single request.
+
+The client turns a schema, the fields being searched and the values being searched for into one request. Every schema says which path it lives at, which query parameter each of its fields is called, and how to read a record out of the response.
+
+```elixir
+defmodule Client do
+  def list(schema, fields, values) do
+    params =
+      for row <- values, {field, value} <- Enum.zip(fields, row) do
+        {schema.param(field), value}
+      end
+
+    %{body: body} =
+      Req.get!(
+        base_url: "https://jsonplaceholder.typicode.com/",
+        url: schema.path(),
+        params: params
+      )
+
+    Enum.map(body, &schema.cast/1)
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Client, <<70, 79, 82, 49, 0, 0, 10, ...>>, ...}
+```
+
+## The schemas
+
+Plain structs, with no knowledge of one another.
+
+```elixir
+defmodule User do
+  defstruct [:id, :name]
+
+  def path, do: "/users"
+
+  def param(:id), do: "id"
+
+  def cast(params) do
+    struct!(__MODULE__, id: Map.fetch!(params, "id"), name: Map.fetch!(params, "name"))
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, User, <<70, 79, 82, 49, 0, 0, 12, ...>>, ...}
+```
+
+```elixir
+defmodule Post do
+  defstruct [:id, :user_id, :title, :body]
+
+  def path, do: "/posts"
+
+  def param(:id), do: "id"
+  def param(:user_id), do: "userId"
+
+  def cast(params) do
+    struct!(__MODULE__,
+      id: Map.fetch!(params, "id"),
+      user_id: Map.fetch!(params, "userId"),
+      title: Map.fetch!(params, "title"),
+      body: Map.fetch!(params, "body")
+    )
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Post, <<70, 79, 82, 49, 0, 0, 14, ...>>, ...}
+```
+
+```elixir
+defmodule Comment do
+  defstruct [:id, :post_id, :name, :body]
+
+  def path, do: "/comments"
+
+  def param(:id), do: "id"
+  def param(:post_id), do: "postId"
+
+  def cast(params) do
+    struct!(__MODULE__,
+      id: Map.fetch!(params, "id"),
+      post_id: Map.fetch!(params, "postId"),
+      name: Map.fetch!(params, "name"),
+      body: Map.fetch!(params, "body")
+    )
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Comment, <<70, 79, 82, 49, 0, 0, 14, ...>>, ...}
+```
+
+## The declarations
+
+`Blog` is the only module that knows how the three relate. Its `fetch/3` leaves the fields open, so the one clause answers every schema, and it prints every call it is asked for so that the requests each load makes are visible below.
+
+```elixir
+defmodule Blog do
+  use Associations
+
+  @impl true
+  def fetch(schema, fields, values) do
+    IO.puts("fetch #{inspect(schema)} by #{inspect(fields)} for #{length(values)} rows")
+
+    Client.list(schema, fields, values)
+  end
+
+  association User do
+    has_many :posts, Post
+    many_to_many :comments, Comment, join_through: Post, join_keys: [user_id: :id, id: :post_id]
+  end
+
+  association Post do
+    belongs_to :author, User, foreign_key: :user_id
+    has_many :comments, Comment
+  end
+
+  association Comment do
+    belongs_to :post, Post
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Blog, <<70, 79, 82, 49, 0, 0, 26, ...>>, ...}
+```
+
+## Loading one record
+
+`load/2` searches for the association of a single record. A `has_many` gives back a list.
+
+```elixir
+user = %User{id: 1}
+
+posts = Blog.load(user, :posts)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Post by [:user_id] for 1 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %Post{
+    id: 1,
+    user_id: 1,
+    title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+    body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+  },
+  %Post{
+    id: 2,
+    user_id: 1,
+    title: "qui est esse",
+    body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
+  },
+  %Post{
+    id: 3,
+    user_id: 1,
+    title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+    body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
+  },
+  %Post{
+    id: 4,
+    user_id: 1,
+    title: "eum et est occaecati",
+    body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+  },
+  %Post{
+    id: 5,
+    user_id: 1,
+    title: "nesciunt quas odio",
+    body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
+  },
+  %Post{
+    id: 6,
+    user_id: 1,
+    title: "dolorem eum magni eos aperiam quia",
+    body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
+  },
+  %Post{
+    id: 7,
+    user_id: 1,
+    title: "magnam facilis autem",
+    body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+  },
+  %Post{
+    id: 8,
+    user_id: 1,
+    title: "dolorem dolore est ipsam",
+    body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
+  },
+  %Post{
+    id: 9,
+    user_id: 1,
+    title: "nesciunt iure omnis dolorem tempora et accusantium",
+    body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
+  },
+  %Post{
+    id: 10,
+    user_id: 1,
+    title: "optio molestias id quia eum",
+    body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
+  }
+]
+```
+
+A `belongs_to` gives back a single record, or `nil` when none matches.
+
+```elixir
+post = hd(posts)
+
+Blog.load(post, :author)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch User by [:id] for 1 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%User{id: 1, name: "Leanne Graham"}
+```
+
+## Loading many at once
+
+`load_many/2` is what keeps an association over a list from querying once per record. The printed line says it: the ten posts are searched for in one request, not ten.
+
+```elixir
+comments_per_post = Blog.load_many(posts, :comments)
+
+for {post, comments} <- comments_per_post, do: {post.id, length(comments)}
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Comment by [:post_id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[{1, 5}, {2, 5}, {3, 5}, {4, 5}, {5, 5}, {6, 5}, {7, 5}, {8, 5}, {9, 5}, {10, 5}]
+```
+
+It returns a `{record, records}` pair per record, in the order they were given, always with a list on the right. Records looking for the same thing are searched for once, so three users cost one request between them.
+
+```elixir
+Blog.load_many([%User{id: 1}, %User{id: 2}, %User{id: 3}], :posts)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Post by [:user_id] for 3 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  {%User{id: 1, name: nil},
+   [
+     %Post{
+       id: 1,
+       user_id: 1,
+       title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+       body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+     },
+     %Post{
+       id: 2,
+       user_id: 1,
+       title: "qui est esse",
+       body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
+     },
+     %Post{
+       id: 3,
+       user_id: 1,
+       title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+       body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
+     },
+     %Post{
+       id: 4,
+       user_id: 1,
+       title: "eum et est occaecati",
+       body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+     },
+     %Post{
+       id: 5,
+       user_id: 1,
+       title: "nesciunt quas odio",
+       body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
+     },
+     %Post{
+       id: 6,
+       user_id: 1,
+       title: "dolorem eum magni eos aperiam quia",
+       body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
+     },
+     %Post{
+       id: 7,
+       user_id: 1,
+       title: "magnam facilis autem",
+       body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+     },
+     %Post{
+       id: 8,
+       user_id: 1,
+       title: "dolorem dolore est ipsam",
+       body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
+     },
+     %Post{
+       id: 9,
+       user_id: 1,
+       title: "nesciunt iure omnis dolorem tempora et accusantium",
+       body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
+     },
+     %Post{
+       id: 10,
+       user_id: 1,
+       title: "optio molestias id quia eum",
+       body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
+     }
+   ]},
+  {%User{id: 2, name: nil},
+   [
+     %Post{
+       id: 11,
+       user_id: 2,
+       title: "et ea vero quia laudantium autem",
+       body: "delectus reiciendis molestiae occaecati non minima eveniet qui voluptatibus\naccusamus in eum beatae sit\nvel qui neque voluptates ut commodi qui incidunt\nut animi commodi"
+     },
+     %Post{
+       id: 12,
+       user_id: 2,
+       title: "in quibusdam tempore odit est dolorem",
+       body: "itaque id aut magnam\npraesentium quia et ea odit et ea voluptas et\nsapiente quia nihil amet occaecati quia id voluptatem\nincidunt ea est distinctio odio"
+     },
+     %Post{
+       id: 13,
+       user_id: 2,
+       title: "dolorum ut in voluptas mollitia et saepe quo animi",
+       body: "aut dicta possimus sint mollitia voluptas commodi quo doloremque\niste corrupti reiciendis voluptatem eius rerum\nsit cumque quod eligendi laborum minima\nperferendis recusandae assumenda consectetur porro architecto ipsum ipsam"
+     },
+     %Post{
+       id: 14,
+       user_id: 2,
+       title: "voluptatem eligendi optio",
+       body: "fuga et accusamus dolorum perferendis illo voluptas\nnon doloremque neque facere\nad qui dolorum molestiae beatae\nsed aut voluptas totam sit illum"
+     },
+     %Post{
+       id: 15,
+       user_id: 2,
+       title: "eveniet quod temporibus",
+       body: "reprehenderit quos placeat\nvelit minima officia dolores impedit repudiandae molestiae nam\nvoluptas recusandae quis delectus\nofficiis harum fugiat vitae"
+     },
+     %Post{
+       id: 16,
+       user_id: 2,
+       title: "sint suscipit perspiciatis velit dolorum rerum ipsa laboriosam odio",
+       body: "suscipit nam nisi quo aperiam aut\nasperiores eos fugit maiores voluptatibus quia\nvoluptatem quis ullam qui in alias quia est\nconsequatur magni mollitia accusamus ea nisi voluptate dicta"
+     },
+     %Post{
+       id: 17,
+       user_id: 2,
+       title: "fugit voluptas sed molestias voluptatem provident",
+       body: "eos voluptas et aut odit natus earum\naspernatur fuga molestiae ullam\ndeserunt ratione qui eos\nqui nihil ratione nemo velit ut aut id quo"
+     },
+     %Post{
+       id: 18,
+       user_id: 2,
+       title: "voluptate et itaque vero tempora molestiae",
+       body: "eveniet quo quis\nlaborum totam consequatur non dolor\nut et est repudiandae\nest voluptatem vel debitis et magnam"
+     },
+     %Post{
+       id: 19,
+       user_id: 2,
+       title: "adipisci placeat illum aut reiciendis qui",
+       body: "illum quis cupiditate provident sit magnam\nea sed aut omnis\nveniam maiores ullam consequatur atque\nadipisci quo iste expedita sit quos voluptas"
+     },
+     %Post{
+       id: 20,
+       user_id: 2,
+       title: "doloribus ad provident suscipit at",
+       body: "qui consequuntur ducimus possimus quisquam amet similique\nsuscipit porro ipsam amet\neos veritatis officiis exercitationem vel fugit aut necessitatibus totam\nomnis rerum consequatur expedita quidem cumque explicabo"
+     }
+   ]},
+  {%User{id: 3, name: nil},
+   [
+     %Post{
+       id: 21,
+       user_id: 3,
+       title: "asperiores ea ipsam voluptatibus modi minima quia sint",
+       body: "repellat aliquid praesentium dolorem quo\nsed totam minus non itaque\nnihil labore molestiae sunt dolor eveniet hic recusandae veniam\ntempora et tenetur expedita sunt"
+     },
+     %Post{
+       id: 22,
+       user_id: 3,
+       title: "dolor sint quo a velit explicabo quia nam",
+       body: "eos qui et ipsum ipsam suscipit aut\nsed omnis non odio\nexpedita earum mollitia molestiae aut atque rem suscipit\nnam impedit esse"
+     },
+     %Post{
+       id: 23,
+       user_id: 3,
+       title: "maxime id vitae nihil numquam",
+       body: "veritatis unde neque eligendi\nquae quod architecto quo neque vitae\nest illo sit tempora doloremque fugit quod\net et vel beatae sequi ullam sed tenetur perspiciatis"
+     },
+     %Post{
+       id: 24,
+       user_id: 3,
+       title: "autem hic labore sunt dolores incidunt",
+       body: "enim et ex nulla\nomnis voluptas quia qui\nvoluptatem consequatur numquam aliquam sunt\ntotam recusandae id dignissimos aut sed asperiores deserunt"
+     },
+     %Post{
+       id: 25,
+       user_id: 3,
+       title: "rem alias distinctio quo quis",
+       body: "ullam consequatur ut\nomnis quis sit vel consequuntur\nipsa eligendi ipsum molestiae et omnis error nostrum\nmolestiae illo tempore quia et distinctio"
+     },
+     %Post{
+       id: 26,
+       user_id: 3,
+       title: "est et quae odit qui non",
+       body: "similique esse doloribus nihil accusamus\nomnis dolorem fuga consequuntur reprehenderit fugit recusandae temporibus\nperspiciatis cum ut laudantium\nomnis aut molestiae vel vero"
+     },
+     %Post{
+       id: 27,
+       user_id: 3,
+       title: "quasi id et eos tenetur aut quo autem",
+       body: "eum sed dolores ipsam sint possimus debitis occaecati\ndebitis qui qui et\nut placeat enim earum aut odit facilis\nconsequatur suscipit necessitatibus rerum sed inventore temporibus consequatur"
+     },
+     %Post{
+       id: 28,
+       user_id: 3,
+       title: "delectus ullam et corporis nulla voluptas sequi",
+       body: "non et quaerat ex quae ad maiores\nmaiores recusandae totam aut blanditiis mollitia quas illo\nut voluptatibus voluptatem\nsimilique nostrum eum"
+     },
+     %Post{
+       id: 29,
+       user_id: 3,
+       title: "iusto eius quod necessitatibus culpa ea",
+       body: "odit magnam ut saepe sed non qui\ntempora atque nihil\naccusamus illum doloribus illo dolor\neligendi repudiandae odit magni similique sed cum maiores"
+     },
+     %Post{
+       id: 30,
+       user_id: 3,
+       title: "a quo magni similique perferendis",
+       body: "alias dolor cumque\nimpedit blanditiis non eveniet odio maxime\nblanditiis amet eius quis tempora quia autem rem\na provident perspiciatis quia"
+     }
+   ]}
+]
+```
+
+## Association paths
+
+A path walks one association of the records the one before it found, the way `get_in/2` walks a nested map. Every hop is searched for in its own batch, no matter how many records reached it, so the two printed lines are the whole cost of reading every comment on every post a user wrote.
+
+```elixir
+Blog.load(user, [:posts, :comments])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Post by [:user_id] for 1 rows
+fetch Comment by [:post_id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %Comment{
+    id: 1,
+    post_id: 1,
+    name: "id labore ex et quam laborum",
+    body: "laudantium enim quasi est quidem magnam voluptate ipsam eos\ntempora quo necessitatibus\ndolor quam autem quasi\nreiciendis et nam sapiente accusantium"
+  },
+  %Comment{
+    id: 2,
+    post_id: 1,
+    name: "quo vero reiciendis velit similique earum",
+    body: "est natus enim nihil est dolore omnis voluptatem numquam\net omnis occaecati quod ullam at\nvoluptatem error expedita pariatur\nnihil sint nostrum voluptatem reiciendis et"
+  },
+  %Comment{
+    id: 3,
+    post_id: 1,
+    name: "odio adipisci rerum aut animi",
+    body: "quia molestiae reprehenderit quasi aspernatur\naut expedita occaecati aliquam eveniet laudantium\nomnis quibusdam delectus saepe quia accusamus maiores nam est\ncum et ducimus et vero voluptates excepturi deleniti ratione"
+  },
+  %Comment{
+    id: 4,
+    post_id: 1,
+    name: "alias odio sit",
+    body: "non et atque\noccaecati deserunt quas accusantium unde odit nobis qui voluptatem\nquia voluptas consequuntur itaque dolor\net qui rerum deleniti ut occaecati"
+  },
+  %Comment{
+    id: 5,
+    post_id: 1,
+    name: "vero eaque aliquid doloribus et culpa",
+    body: "harum non quasi et ratione\ntempore iure ex voluptates in ratione\nharum architecto fugit inventore cupiditate\nvoluptates magni quo et"
+  },
+  %Comment{
+    id: 6,
+    post_id: 2,
+    name: "et fugit eligendi deleniti quidem qui sint nihil autem",
+    body: "doloribus at sed quis culpa deserunt consectetur qui praesentium\naccusamus fugiat dicta\nvoluptatem rerum ut voluptate autem\nvoluptatem repellendus aspernatur dolorem in"
+  },
+  %Comment{
+    id: 7,
+    post_id: 2,
+    name: "repellat consequatur praesentium vel minus molestias voluptatum",
+    body: "maiores sed dolores similique labore et inventore et\nquasi temporibus esse sunt id et\neos voluptatem aliquam\naliquid ratione corporis molestiae mollitia quia et magnam dolor"
+  },
+  %Comment{
+    id: 8,
+    post_id: 2,
+    name: "et omnis dolorem",
+    body: "ut voluptatem corrupti velit\nad voluptatem maiores\net nisi velit vero accusamus maiores\nvoluptates quia aliquid ullam eaque"
+  },
+  %Comment{
+    id: 9,
+    post_id: 2,
+    name: "provident id voluptas",
+    body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+  },
+  %Comment{
+    id: 10,
+    post_id: 2,
+    name: "eaque et deleniti atque tenetur ut quo ut",
+    body: "voluptate iusto quis nobis reprehenderit ipsum amet nulla\nquia quas dolores velit et non\naut quia necessitatibus\nnostrum quaerat nulla et accusamus nisi facilis"
+  },
+  %Comment{
+    id: 11,
+    post_id: 3,
+    name: "fugit labore quia mollitia quas deserunt nostrum sunt",
+    body: "ut dolorum nostrum id quia aut est\nfuga est inventore vel eligendi explicabo quis consectetur\naut occaecati repellat id natus quo est\nut blanditiis quia ut vel ut maiores ea"
+  },
+  %Comment{
+    id: 12,
+    post_id: 3,
+    name: "modi ut eos dolores illum nam dolor",
+    body: "expedita maiores dignissimos facilis\nipsum est rem est fugit velit sequi\neum odio dolores dolor totam\noccaecati ratione eius rem velit"
+  },
+  %Comment{
+    id: 13,
+    post_id: 3,
+    name: "aut inventore non pariatur sit vitae voluptatem sapiente",
+    body: "fuga eos qui dolor rerum\ninventore corporis exercitationem\ncorporis cupiditate et deserunt recusandae est sed quis culpa\neum maiores corporis et"
+  },
+  %Comment{
+    id: 14,
+    post_id: 3,
+    name: "et officiis id praesentium hic aut ipsa dolorem repudiandae",
+    body: "vel quae voluptas qui exercitationem\nvoluptatibus unde sed\nminima et qui ipsam aspernatur\nexpedita magnam laudantium et et quaerat ut qui dolorum"
+  },
+  %Comment{
+    id: 15,
+    post_id: 3,
+    name: "debitis magnam hic odit aut ullam nostrum tenetur",
+    body: "nihil ut voluptates blanditiis autem odio dicta rerum\nquisquam saepe et est\nsunt quasi nemo laudantium deserunt\nmolestias tempora quo quia"
+  },
+  %Comment{
+    id: 16,
+    post_id: 4,
+    name: "perferendis temporibus delectus optio ea eum ratione dolorum",
+    body: "iste ut laborum aliquid velit facere itaque\nquo ut soluta dicta voluptate\nerror tempore aut et\nsequi reiciendis dignissimos expedita consequuntur libero sed fugiat facilis"
+  },
+  %Comment{
+    id: 17,
+    post_id: 4,
+    name: "eos est animi quis",
+    body: "consequatur necessitatibus totam sed sit dolorum\nrecusandae quae odio excepturi voluptatum harum voluptas\nquisquam sit ad eveniet delectus\ndoloribus odio qui non labore"
+  },
+  %Comment{
+    id: 18,
+    post_id: 4,
+    name: "aut et tenetur ducimus illum aut nulla ab",
+    body: "veritatis voluptates necessitatibus maiores corrupti\nneque et exercitationem amet sit et\nullam velit sit magnam laborum\nmagni ut molestias"
+  },
+  %Comment{
+    id: 19,
+    post_id: 4,
+    name: "sed impedit rerum quia et et inventore unde officiis",
+    body: "doloribus est illo sed minima aperiam\nut dignissimos accusantium tempore atque et aut molestiae\nmagni ut accusamus voluptatem quos ut voluptates\nquisquam porro sed architecto ut"
+  },
+  %Comment{
+    id: 20,
+    post_id: 4,
+    name: "molestias expedita iste aliquid voluptates",
+    body: "qui harum consequatur fugiat\net eligendi perferendis at molestiae commodi ducimus\ndoloremque asperiores numquam qui\nut sit dignissimos reprehenderit tempore"
+  },
+  %Comment{
+    id: 21,
+    post_id: 5,
+    name: "aliquid rerum mollitia qui a consectetur eum sed",
+    body: "deleniti aut sed molestias explicabo\ncommodi odio ratione nesciunt\nvoluptate doloremque est\nnam autem error delectus"
+  },
+  %Comment{
+    id: 22,
+    post_id: 5,
+    name: "porro repellendus aut tempore quis hic",
+    body: "qui ipsa animi nostrum praesentium voluptatibus odit\nqui non impedit cum qui nostrum aliquid fuga explicabo\nvoluptatem fugit earum voluptas exercitationem temporibus dignissimos distinctio\nesse inventore reprehenderit quidem ut incidunt nihil necessitatibus rerum"
+  },
+  %Comment{
+    id: 23,
+    post_id: 5,
+    name: "quis tempora quidem nihil iste",
+    body: "voluptates provident repellendus iusto perspiciatis ex fugiat ut\nut dolor nam aliquid et expedita voluptate\nsunt vitae illo rerum in quos\nvel eligendi enim quae fugiat est"
+  },
+  %Comment{
+    id: 24,
+    post_id: 5,
+    name: "in tempore eos beatae est",
+    body: "repudiandae repellat quia\nsequi est dolore explicabo nihil et\net sit et\net praesentium iste atque asperiores tenetur"
+  },
+  %Comment{
+    id: 25,
+    post_id: 5,
+    name: "autem ab ea sit alias hic provident sit",
+    body: "sunt aut quae laboriosam sit ut impedit\nadipisci harum laborum totam deleniti voluptas odit rem ea\nnon iure distinctio ut velit doloribus\net non ex"
+  },
+  %Comment{
+    id: 26,
+    post_id: 6,
+    name: "in deleniti sunt provident soluta ratione veniam quam praesentium",
+    body: "incidunt sapiente eaque dolor eos\nad est molestias\nquas sit et nihil exercitationem at cumque ullam\nnihil magnam et"
+  },
+  %Comment{
+    id: 27,
+    post_id: 6,
+    name: "doloribus quibusdam molestiae amet illum",
+    body: "nisi vel quas ut laborum ratione\nrerum magni eum\nunde et voluptatem saepe\nvoluptas corporis modi amet ipsam eos saepe porro"
+  },
+  %Comment{
+    id: 28,
+    post_id: 6,
+    name: "quo voluptates voluptas nisi veritatis dignissimos dolores ut officiis",
+    body: "voluptatem repellendus quo alias at laudantium\nmollitia quidem esse\ntemporibus consequuntur vitae rerum illum\nid corporis sit id"
+  },
+  %Comment{
+    id: 29,
+    post_id: 6,
+    name: "eum distinctio amet dolor",
+    body: "tempora voluptatem est\nmagnam distinctio autem est dolorem\net ipsa molestiae odit rerum itaque corporis nihil nam\neaque rerum error"
+  },
+  %Comment{
+    id: 30,
+    post_id: 6,
+    name: "quasi nulla ducimus facilis non voluptas aut",
+    body: "consequuntur quia voluptate assumenda et\nautem voluptatem reiciendis ipsum animi est provident\nearum aperiam sapiente ad vitae iste\naccusantium aperiam eius qui dolore voluptatem et"
+  },
+  %Comment{
+    id: 31,
+    post_id: 7,
+    name: "ex velit ut cum eius odio ad placeat",
+    body: "quia incidunt ut\naliquid est ut rerum deleniti iure est\nipsum quia ea sint et\nvoluptatem quaerat eaque repudiandae eveniet aut"
+  },
+  %Comment{
+    id: 32,
+    post_id: 7,
+    name: "dolorem architecto ut pariatur quae qui suscipit",
+    body: "nihil ea itaque libero illo\nofficiis quo quo dicta inventore consequatur voluptas voluptatem\ncorporis sed necessitatibus velit tempore\nrerum velit et temporibus"
+  },
+  %Comment{
+    id: 33,
+    post_id: 7,
+    name: "voluptatum totam vel voluptate omnis",
+    body: "fugit harum quae vero\nlibero unde tempore\nsoluta eaque culpa sequi quibusdam nulla id\net et necessitatibus"
+  },
+  %Comment{
+    id: 34,
+    post_id: 7,
+    name: "omnis nemo sunt ab autem",
+    body: "omnis temporibus quasi ab omnis\nfacilis et omnis illum quae quasi aut\nminus iure ex rem ut reprehenderit\nin non fugit"
+  },
+  %Comment{
+    id: 35,
+    post_id: 7,
+    name: "repellendus sapiente omnis praesentium aliquam ipsum id molestiae omnis",
+    body: "dolor mollitia quidem facere et\nvel est ut\nut repudiandae est quidem dolorem sed atque\nrem quia aut adipisci sunt"
+  },
+  %Comment{
+    id: 36,
+    post_id: 8,
+    name: "sit et quis",
+    body: "aut vero est\ndolor non aut excepturi dignissimos illo nisi aut quas\naut magni quia nostrum provident magnam quas modi maxime\nvoluptatem et molestiae"
+  },
+  %Comment{
+    id: 37,
+    post_id: 8,
+    name: "beatae veniam nemo rerum voluptate quam aspernatur",
+    body: "qui rem amet aut\ncumque maiores earum ut quia sit nam esse qui\niusto aspernatur quis voluptas\ndolorem distinctio ex temporibus rem"
+  },
+  %Comment{
+    id: 38,
+    post_id: 8,
+    name: "maiores dolores expedita",
+    body: "unde voluptatem qui dicta\nvel ad aut eos error consequatur voluptatem\nadipisci doloribus qui est sit aut\nvelit aut et ea ratione eveniet iure fuga"
+  },
+  %Comment{
+    id: 39,
+    post_id: 8,
+    name: "necessitatibus ratione aut ut delectus quae ut",
+    body: "atque consequatur dolorem sunt\nadipisci autem et\nvoluptatibus et quae necessitatibus rerum eaque aperiam nostrum nemo\neligendi sed et beatae et inventore"
+  },
+  %Comment{
+    id: 40,
+    post_id: 8,
+    name: "non minima omnis deleniti pariatur facere quibusdam at",
+    body: "quod minus alias quos\nperferendis labore molestias quae ut ut corporis deserunt vitae\net quaerat ut et ullam unde asperiores\ncum voluptatem cumque"
+  },
+  ...
+]
+```
+
+The records the hops in between found are not returned, and neither are repeats, so a path says which records it ended on rather than which of the records before them led there. Walking from a post to its comments and back lands on the post it started from.
+
+```elixir
+Blog.load_many(posts, [:comments, :post])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Comment by [:post_id] for 10 rows
+fetch Post by [:id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  {%Post{
+     id: 1,
+     user_id: 1,
+     title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+     body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+   },
+   [
+     %Post{
+       id: 1,
+       user_id: 1,
+       title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+       body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+     }
+   ]},
+  {%Post{
+     id: 2,
+     user_id: 1,
+     title: "qui est esse",
+     body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
+   },
+   [
+     %Post{
+       id: 2,
+       user_id: 1,
+       title: "qui est esse",
+       body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
+     }
+   ]},
+  {%Post{
+     id: 3,
+     user_id: 1,
+     title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+     body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
+   },
+   [
+     %Post{
+       id: 3,
+       user_id: 1,
+       title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+       body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
+     }
+   ]},
+  {%Post{
+     id: 4,
+     user_id: 1,
+     title: "eum et est occaecati",
+     body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+   },
+   [
+     %Post{
+       id: 4,
+       user_id: 1,
+       title: "eum et est occaecati",
+       body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+     }
+   ]},
+  {%Post{
+     id: 5,
+     user_id: 1,
+     title: "nesciunt quas odio",
+     body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
+   },
+   [
+     %Post{
+       id: 5,
+       user_id: 1,
+       title: "nesciunt quas odio",
+       body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
+     }
+   ]},
+  {%Post{
+     id: 6,
+     user_id: 1,
+     title: "dolorem eum magni eos aperiam quia",
+     body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
+   },
+   [
+     %Post{
+       id: 6,
+       user_id: 1,
+       title: "dolorem eum magni eos aperiam quia",
+       body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
+     }
+   ]},
+  {%Post{
+     id: 7,
+     user_id: 1,
+     title: "magnam facilis autem",
+     body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+   },
+   [
+     %Post{
+       id: 7,
+       user_id: 1,
+       title: "magnam facilis autem",
+       body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+     }
+   ]},
+  {%Post{
+     id: 8,
+     user_id: 1,
+     title: "dolorem dolore est ipsam",
+     body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
+   },
+   [
+     %Post{
+       id: 8,
+       user_id: 1,
+       title: "dolorem dolore est ipsam",
+       body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
+     }
+   ]},
+  {%Post{
+     id: 9,
+     user_id: 1,
+     title: "nesciunt iure omnis dolorem tempora et accusantium",
+     body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
+   },
+   [
+     %Post{
+       id: 9,
+       user_id: 1,
+       title: "nesciunt iure omnis dolorem tempora et accusantium",
+       body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
+     }
+   ]},
+  {%Post{
+     id: 10,
+     user_id: 1,
+     title: "optio molestias id quia eum",
+     body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
+   },
+   [
+     %Post{
+       id: 10,
+       user_id: 1,
+       title: "optio molestias id quia eum",
+       body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
+     }
+   ]}
+]
+```
+
+## Many to many
+
+`Post` is a join between `User` and `Comment`: it holds the `user_id` of the author and is pointed at by the `post_id` of the comment. A `many_to_many` searches the join schema before the associated one, so it makes the same two searches the path above did, spelled as a single association.
+
+```elixir
+Blog.load(user, :comments)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Post by [:user_id] for 1 rows
+fetch Comment by [:post_id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %Comment{
+    id: 1,
+    post_id: 1,
+    name: "id labore ex et quam laborum",
+    body: "laudantium enim quasi est quidem magnam voluptate ipsam eos\ntempora quo necessitatibus\ndolor quam autem quasi\nreiciendis et nam sapiente accusantium"
+  },
+  %Comment{
+    id: 2,
+    post_id: 1,
+    name: "quo vero reiciendis velit similique earum",
+    body: "est natus enim nihil est dolore omnis voluptatem numquam\net omnis occaecati quod ullam at\nvoluptatem error expedita pariatur\nnihil sint nostrum voluptatem reiciendis et"
+  },
+  %Comment{
+    id: 3,
+    post_id: 1,
+    name: "odio adipisci rerum aut animi",
+    body: "quia molestiae reprehenderit quasi aspernatur\naut expedita occaecati aliquam eveniet laudantium\nomnis quibusdam delectus saepe quia accusamus maiores nam est\ncum et ducimus et vero voluptates excepturi deleniti ratione"
+  },
+  %Comment{
+    id: 4,
+    post_id: 1,
+    name: "alias odio sit",
+    body: "non et atque\noccaecati deserunt quas accusantium unde odit nobis qui voluptatem\nquia voluptas consequuntur itaque dolor\net qui rerum deleniti ut occaecati"
+  },
+  %Comment{
+    id: 5,
+    post_id: 1,
+    name: "vero eaque aliquid doloribus et culpa",
+    body: "harum non quasi et ratione\ntempore iure ex voluptates in ratione\nharum architecto fugit inventore cupiditate\nvoluptates magni quo et"
+  },
+  %Comment{
+    id: 6,
+    post_id: 2,
+    name: "et fugit eligendi deleniti quidem qui sint nihil autem",
+    body: "doloribus at sed quis culpa deserunt consectetur qui praesentium\naccusamus fugiat dicta\nvoluptatem rerum ut voluptate autem\nvoluptatem repellendus aspernatur dolorem in"
+  },
+  %Comment{
+    id: 7,
+    post_id: 2,
+    name: "repellat consequatur praesentium vel minus molestias voluptatum",
+    body: "maiores sed dolores similique labore et inventore et\nquasi temporibus esse sunt id et\neos voluptatem aliquam\naliquid ratione corporis molestiae mollitia quia et magnam dolor"
+  },
+  %Comment{
+    id: 8,
+    post_id: 2,
+    name: "et omnis dolorem",
+    body: "ut voluptatem corrupti velit\nad voluptatem maiores\net nisi velit vero accusamus maiores\nvoluptates quia aliquid ullam eaque"
+  },
+  %Comment{
+    id: 9,
+    post_id: 2,
+    name: "provident id voluptas",
+    body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+  },
+  %Comment{
+    id: 10,
+    post_id: 2,
+    name: "eaque et deleniti atque tenetur ut quo ut",
+    body: "voluptate iusto quis nobis reprehenderit ipsum amet nulla\nquia quas dolores velit et non\naut quia necessitatibus\nnostrum quaerat nulla et accusamus nisi facilis"
+  },
+  %Comment{
+    id: 11,
+    post_id: 3,
+    name: "fugit labore quia mollitia quas deserunt nostrum sunt",
+    body: "ut dolorum nostrum id quia aut est\nfuga est inventore vel eligendi explicabo quis consectetur\naut occaecati repellat id natus quo est\nut blanditiis quia ut vel ut maiores ea"
+  },
+  %Comment{
+    id: 12,
+    post_id: 3,
+    name: "modi ut eos dolores illum nam dolor",
+    body: "expedita maiores dignissimos facilis\nipsum est rem est fugit velit sequi\neum odio dolores dolor totam\noccaecati ratione eius rem velit"
+  },
+  %Comment{
+    id: 13,
+    post_id: 3,
+    name: "aut inventore non pariatur sit vitae voluptatem sapiente",
+    body: "fuga eos qui dolor rerum\ninventore corporis exercitationem\ncorporis cupiditate et deserunt recusandae est sed quis culpa\neum maiores corporis et"
+  },
+  %Comment{
+    id: 14,
+    post_id: 3,
+    name: "et officiis id praesentium hic aut ipsa dolorem repudiandae",
+    body: "vel quae voluptas qui exercitationem\nvoluptatibus unde sed\nminima et qui ipsam aspernatur\nexpedita magnam laudantium et et quaerat ut qui dolorum"
+  },
+  %Comment{
+    id: 15,
+    post_id: 3,
+    name: "debitis magnam hic odit aut ullam nostrum tenetur",
+    body: "nihil ut voluptates blanditiis autem odio dicta rerum\nquisquam saepe et est\nsunt quasi nemo laudantium deserunt\nmolestias tempora quo quia"
+  },
+  %Comment{
+    id: 16,
+    post_id: 4,
+    name: "perferendis temporibus delectus optio ea eum ratione dolorum",
+    body: "iste ut laborum aliquid velit facere itaque\nquo ut soluta dicta voluptate\nerror tempore aut et\nsequi reiciendis dignissimos expedita consequuntur libero sed fugiat facilis"
+  },
+  %Comment{
+    id: 17,
+    post_id: 4,
+    name: "eos est animi quis",
+    body: "consequatur necessitatibus totam sed sit dolorum\nrecusandae quae odio excepturi voluptatum harum voluptas\nquisquam sit ad eveniet delectus\ndoloribus odio qui non labore"
+  },
+  %Comment{
+    id: 18,
+    post_id: 4,
+    name: "aut et tenetur ducimus illum aut nulla ab",
+    body: "veritatis voluptates necessitatibus maiores corrupti\nneque et exercitationem amet sit et\nullam velit sit magnam laborum\nmagni ut molestias"
+  },
+  %Comment{
+    id: 19,
+    post_id: 4,
+    name: "sed impedit rerum quia et et inventore unde officiis",
+    body: "doloribus est illo sed minima aperiam\nut dignissimos accusantium tempore atque et aut molestiae\nmagni ut accusamus voluptatem quos ut voluptates\nquisquam porro sed architecto ut"
+  },
+  %Comment{
+    id: 20,
+    post_id: 4,
+    name: "molestias expedita iste aliquid voluptates",
+    body: "qui harum consequatur fugiat\net eligendi perferendis at molestiae commodi ducimus\ndoloremque asperiores numquam qui\nut sit dignissimos reprehenderit tempore"
+  },
+  %Comment{
+    id: 21,
+    post_id: 5,
+    name: "aliquid rerum mollitia qui a consectetur eum sed",
+    body: "deleniti aut sed molestias explicabo\ncommodi odio ratione nesciunt\nvoluptate doloremque est\nnam autem error delectus"
+  },
+  %Comment{
+    id: 22,
+    post_id: 5,
+    name: "porro repellendus aut tempore quis hic",
+    body: "qui ipsa animi nostrum praesentium voluptatibus odit\nqui non impedit cum qui nostrum aliquid fuga explicabo\nvoluptatem fugit earum voluptas exercitationem temporibus dignissimos distinctio\nesse inventore reprehenderit quidem ut incidunt nihil necessitatibus rerum"
+  },
+  %Comment{
+    id: 23,
+    post_id: 5,
+    name: "quis tempora quidem nihil iste",
+    body: "voluptates provident repellendus iusto perspiciatis ex fugiat ut\nut dolor nam aliquid et expedita voluptate\nsunt vitae illo rerum in quos\nvel eligendi enim quae fugiat est"
+  },
+  %Comment{
+    id: 24,
+    post_id: 5,
+    name: "in tempore eos beatae est",
+    body: "repudiandae repellat quia\nsequi est dolore explicabo nihil et\net sit et\net praesentium iste atque asperiores tenetur"
+  },
+  %Comment{
+    id: 25,
+    post_id: 5,
+    name: "autem ab ea sit alias hic provident sit",
+    body: "sunt aut quae laboriosam sit ut impedit\nadipisci harum laborum totam deleniti voluptas odit rem ea\nnon iure distinctio ut velit doloribus\net non ex"
+  },
+  %Comment{
+    id: 26,
+    post_id: 6,
+    name: "in deleniti sunt provident soluta ratione veniam quam praesentium",
+    body: "incidunt sapiente eaque dolor eos\nad est molestias\nquas sit et nihil exercitationem at cumque ullam\nnihil magnam et"
+  },
+  %Comment{
+    id: 27,
+    post_id: 6,
+    name: "doloribus quibusdam molestiae amet illum",
+    body: "nisi vel quas ut laborum ratione\nrerum magni eum\nunde et voluptatem saepe\nvoluptas corporis modi amet ipsam eos saepe porro"
+  },
+  %Comment{
+    id: 28,
+    post_id: 6,
+    name: "quo voluptates voluptas nisi veritatis dignissimos dolores ut officiis",
+    body: "voluptatem repellendus quo alias at laudantium\nmollitia quidem esse\ntemporibus consequuntur vitae rerum illum\nid corporis sit id"
+  },
+  %Comment{
+    id: 29,
+    post_id: 6,
+    name: "eum distinctio amet dolor",
+    body: "tempora voluptatem est\nmagnam distinctio autem est dolorem\net ipsa molestiae odit rerum itaque corporis nihil nam\neaque rerum error"
+  },
+  %Comment{
+    id: 30,
+    post_id: 6,
+    name: "quasi nulla ducimus facilis non voluptas aut",
+    body: "consequuntur quia voluptate assumenda et\nautem voluptatem reiciendis ipsum animi est provident\nearum aperiam sapiente ad vitae iste\naccusantium aperiam eius qui dolore voluptatem et"
+  },
+  %Comment{
+    id: 31,
+    post_id: 7,
+    name: "ex velit ut cum eius odio ad placeat",
+    body: "quia incidunt ut\naliquid est ut rerum deleniti iure est\nipsum quia ea sint et\nvoluptatem quaerat eaque repudiandae eveniet aut"
+  },
+  %Comment{
+    id: 32,
+    post_id: 7,
+    name: "dolorem architecto ut pariatur quae qui suscipit",
+    body: "nihil ea itaque libero illo\nofficiis quo quo dicta inventore consequatur voluptas voluptatem\ncorporis sed necessitatibus velit tempore\nrerum velit et temporibus"
+  },
+  %Comment{
+    id: 33,
+    post_id: 7,
+    name: "voluptatum totam vel voluptate omnis",
+    body: "fugit harum quae vero\nlibero unde tempore\nsoluta eaque culpa sequi quibusdam nulla id\net et necessitatibus"
+  },
+  %Comment{
+    id: 34,
+    post_id: 7,
+    name: "omnis nemo sunt ab autem",
+    body: "omnis temporibus quasi ab omnis\nfacilis et omnis illum quae quasi aut\nminus iure ex rem ut reprehenderit\nin non fugit"
+  },
+  %Comment{
+    id: 35,
+    post_id: 7,
+    name: "repellendus sapiente omnis praesentium aliquam ipsum id molestiae omnis",
+    body: "dolor mollitia quidem facere et\nvel est ut\nut repudiandae est quidem dolorem sed atque\nrem quia aut adipisci sunt"
+  },
+  %Comment{
+    id: 36,
+    post_id: 8,
+    name: "sit et quis",
+    body: "aut vero est\ndolor non aut excepturi dignissimos illo nisi aut quas\naut magni quia nostrum provident magnam quas modi maxime\nvoluptatem et molestiae"
+  },
+  %Comment{
+    id: 37,
+    post_id: 8,
+    name: "beatae veniam nemo rerum voluptate quam aspernatur",
+    body: "qui rem amet aut\ncumque maiores earum ut quia sit nam esse qui\niusto aspernatur quis voluptas\ndolorem distinctio ex temporibus rem"
+  },
+  %Comment{
+    id: 38,
+    post_id: 8,
+    name: "maiores dolores expedita",
+    body: "unde voluptatem qui dicta\nvel ad aut eos error consequatur voluptatem\nadipisci doloribus qui est sit aut\nvelit aut et ea ratione eveniet iure fuga"
+  },
+  %Comment{
+    id: 39,
+    post_id: 8,
+    name: "necessitatibus ratione aut ut delectus quae ut",
+    body: "atque consequatur dolorem sunt\nadipisci autem et\nvoluptatibus et quae necessitatibus rerum eaque aperiam nostrum nemo\neligendi sed et beatae et inventore"
+  },
+  %Comment{
+    id: 40,
+    post_id: 8,
+    name: "non minima omnis deleniti pariatur facere quibusdam at",
+    body: "quod minus alias quos\nperferendis labore molestias quae ut ut corporis deserunt vitae\net quaerat ut et ullam unde asperiores\ncum voluptatem cumque"
+  },
+  ...
+]
+```
+
+The records given to `load_many/2` may be of different schemas, and their associations of different kinds, as long as each of them declares the association by that name. The two walks advance in the same hops, each hop grouped into a batch per set of fields being searched, so the user's `many_to_many` and the post's `has_many` resolve side by side.
+
+```elixir
+Blog.load_many([user, post], :comments)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Post by [:user_id] for 1 rows
+fetch Comment by [:post_id] for 1 rows
+fetch Comment by [:post_id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  {%User{id: 1, name: nil},
+   [
+     %Comment{
+       id: 1,
+       post_id: 1,
+       name: "id labore ex et quam laborum",
+       body: "laudantium enim quasi est quidem magnam voluptate ipsam eos\ntempora quo necessitatibus\ndolor quam autem quasi\nreiciendis et nam sapiente accusantium"
+     },
+     %Comment{
+       id: 2,
+       post_id: 1,
+       name: "quo vero reiciendis velit similique earum",
+       body: "est natus enim nihil est dolore omnis voluptatem numquam\net omnis occaecati quod ullam at\nvoluptatem error expedita pariatur\nnihil sint nostrum voluptatem reiciendis et"
+     },
+     %Comment{
+       id: 3,
+       post_id: 1,
+       name: "odio adipisci rerum aut animi",
+       body: "quia molestiae reprehenderit quasi aspernatur\naut expedita occaecati aliquam eveniet laudantium\nomnis quibusdam delectus saepe quia accusamus maiores nam est\ncum et ducimus et vero voluptates excepturi deleniti ratione"
+     },
+     %Comment{
+       id: 4,
+       post_id: 1,
+       name: "alias odio sit",
+       body: "non et atque\noccaecati deserunt quas accusantium unde odit nobis qui voluptatem\nquia voluptas consequuntur itaque dolor\net qui rerum deleniti ut occaecati"
+     },
+     %Comment{
+       id: 5,
+       post_id: 1,
+       name: "vero eaque aliquid doloribus et culpa",
+       body: "harum non quasi et ratione\ntempore iure ex voluptates in ratione\nharum architecto fugit inventore cupiditate\nvoluptates magni quo et"
+     },
+     %Comment{
+       id: 6,
+       post_id: 2,
+       name: "et fugit eligendi deleniti quidem qui sint nihil autem",
+       body: "doloribus at sed quis culpa deserunt consectetur qui praesentium\naccusamus fugiat dicta\nvoluptatem rerum ut voluptate autem\nvoluptatem repellendus aspernatur dolorem in"
+     },
+     %Comment{
+       id: 7,
+       post_id: 2,
+       name: "repellat consequatur praesentium vel minus molestias voluptatum",
+       body: "maiores sed dolores similique labore et inventore et\nquasi temporibus esse sunt id et\neos voluptatem aliquam\naliquid ratione corporis molestiae mollitia quia et magnam dolor"
+     },
+     %Comment{
+       id: 8,
+       post_id: 2,
+       name: "et omnis dolorem",
+       body: "ut voluptatem corrupti velit\nad voluptatem maiores\net nisi velit vero accusamus maiores\nvoluptates quia aliquid ullam eaque"
+     },
+     %Comment{
+       id: 9,
+       post_id: 2,
+       name: "provident id voluptas",
+       body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+     },
+     %Comment{
+       id: 10,
+       post_id: 2,
+       name: "eaque et deleniti atque tenetur ut quo ut",
+       body: "voluptate iusto quis nobis reprehenderit ipsum amet nulla\nquia quas dolores velit et non\naut quia necessitatibus\nnostrum quaerat nulla et accusamus nisi facilis"
+     },
+     %Comment{
+       id: 11,
+       post_id: 3,
+       name: "fugit labore quia mollitia quas deserunt nostrum sunt",
+       body: "ut dolorum nostrum id quia aut est\nfuga est inventore vel eligendi explicabo quis consectetur\naut occaecati repellat id natus quo est\nut blanditiis quia ut vel ut maiores ea"
+     },
+     %Comment{
+       id: 12,
+       post_id: 3,
+       name: "modi ut eos dolores illum nam dolor",
+       body: "expedita maiores dignissimos facilis\nipsum est rem est fugit velit sequi\neum odio dolores dolor totam\noccaecati ratione eius rem velit"
+     },
+     %Comment{
+       id: 13,
+       post_id: 3,
+       name: "aut inventore non pariatur sit vitae voluptatem sapiente",
+       body: "fuga eos qui dolor rerum\ninventore corporis exercitationem\ncorporis cupiditate et deserunt recusandae est sed quis culpa\neum maiores corporis et"
+     },
+     %Comment{
+       id: 14,
+       post_id: 3,
+       name: "et officiis id praesentium hic aut ipsa dolorem repudiandae",
+       body: "vel quae voluptas qui exercitationem\nvoluptatibus unde sed\nminima et qui ipsam aspernatur\nexpedita magnam laudantium et et quaerat ut qui dolorum"
+     },
+     %Comment{
+       id: 15,
+       post_id: 3,
+       name: "debitis magnam hic odit aut ullam nostrum tenetur",
+       body: "nihil ut voluptates blanditiis autem odio dicta rerum\nquisquam saepe et est\nsunt quasi nemo laudantium deserunt\nmolestias tempora quo quia"
+     },
+     %Comment{
+       id: 16,
+       post_id: 4,
+       name: "perferendis temporibus delectus optio ea eum ratione dolorum",
+       body: "iste ut laborum aliquid velit facere itaque\nquo ut soluta dicta voluptate\nerror tempore aut et\nsequi reiciendis dignissimos expedita consequuntur libero sed fugiat facilis"
+     },
+     %Comment{
+       id: 17,
+       post_id: 4,
+       name: "eos est animi quis",
+       body: "consequatur necessitatibus totam sed sit dolorum\nrecusandae quae odio excepturi voluptatum harum voluptas\nquisquam sit ad eveniet delectus\ndoloribus odio qui non labore"
+     },
+     %Comment{
+       id: 18,
+       post_id: 4,
+       name: "aut et tenetur ducimus illum aut nulla ab",
+       body: "veritatis voluptates necessitatibus maiores corrupti\nneque et exercitationem amet sit et\nullam velit sit magnam laborum\nmagni ut molestias"
+     },
+     %Comment{
+       id: 19,
+       post_id: 4,
+       name: "sed impedit rerum quia et et inventore unde officiis",
+       body: "doloribus est illo sed minima aperiam\nut dignissimos accusantium tempore atque et aut molestiae\nmagni ut accusamus voluptatem quos ut voluptates\nquisquam porro sed architecto ut"
+     },
+     %Comment{
+       id: 20,
+       post_id: 4,
+       name: "molestias expedita iste aliquid voluptates",
+       body: "qui harum consequatur fugiat\net eligendi perferendis at molestiae commodi ducimus\ndoloremque asperiores numquam qui\nut sit dignissimos reprehenderit tempore"
+     },
+     %Comment{
+       id: 21,
+       post_id: 5,
+       name: "aliquid rerum mollitia qui a consectetur eum sed",
+       body: "deleniti aut sed molestias explicabo\ncommodi odio ratione nesciunt\nvoluptate doloremque est\nnam autem error delectus"
+     },
+     %Comment{
+       id: 22,
+       post_id: 5,
+       name: "porro repellendus aut tempore quis hic",
+       body: "qui ipsa animi nostrum praesentium voluptatibus odit\nqui non impedit cum qui nostrum aliquid fuga explicabo\nvoluptatem fugit earum voluptas exercitationem temporibus dignissimos distinctio\nesse inventore reprehenderit quidem ut incidunt nihil necessitatibus rerum"
+     },
+     %Comment{
+       id: 23,
+       post_id: 5,
+       name: "quis tempora quidem nihil iste",
+       body: "voluptates provident repellendus iusto perspiciatis ex fugiat ut\nut dolor nam aliquid et expedita voluptate\nsunt vitae illo rerum in quos\nvel eligendi enim quae fugiat est"
+     },
+     %Comment{
+       id: 24,
+       post_id: 5,
+       name: "in tempore eos beatae est",
+       body: "repudiandae repellat quia\nsequi est dolore explicabo nihil et\net sit et\net praesentium iste atque asperiores tenetur"
+     },
+     %Comment{
+       id: 25,
+       post_id: 5,
+       name: "autem ab ea sit alias hic provident sit",
+       body: "sunt aut quae laboriosam sit ut impedit\nadipisci harum laborum totam deleniti voluptas odit rem ea\nnon iure distinctio ut velit doloribus\net non ex"
+     },
+     %Comment{
+       id: 26,
+       post_id: 6,
+       name: "in deleniti sunt provident soluta ratione veniam quam praesentium",
+       body: "incidunt sapiente eaque dolor eos\nad est molestias\nquas sit et nihil exercitationem at cumque ullam\nnihil magnam et"
+     },
+     %Comment{
+       id: 27,
+       post_id: 6,
+       name: "doloribus quibusdam molestiae amet illum",
+       body: "nisi vel quas ut laborum ratione\nrerum magni eum\nunde et voluptatem saepe\nvoluptas corporis modi amet ipsam eos saepe porro"
+     },
+     %Comment{
+       id: 28,
+       post_id: 6,
+       name: "quo voluptates voluptas nisi veritatis dignissimos dolores ut officiis",
+       body: "voluptatem repellendus quo alias at laudantium\nmollitia quidem esse\ntemporibus consequuntur vitae rerum illum\nid corporis sit id"
+     },
+     %Comment{
+       id: 29,
+       post_id: 6,
+       name: "eum distinctio amet dolor",
+       body: "tempora voluptatem est\nmagnam distinctio autem est dolorem\net ipsa molestiae odit rerum itaque corporis nihil nam\neaque rerum error"
+     },
+     %Comment{
+       id: 30,
+       post_id: 6,
+       name: "quasi nulla ducimus facilis non voluptas aut",
+       body: "consequuntur quia voluptate assumenda et\nautem voluptatem reiciendis ipsum animi est provident\nearum aperiam sapiente ad vitae iste\naccusantium aperiam eius qui dolore voluptatem et"
+     },
+     %Comment{
+       id: 31,
+       post_id: 7,
+       name: "ex velit ut cum eius odio ad placeat",
+       body: "quia incidunt ut\naliquid est ut rerum deleniti iure est\nipsum quia ea sint et\nvoluptatem quaerat eaque repudiandae eveniet aut"
+     },
+     %Comment{
+       id: 32,
+       post_id: 7,
+       name: "dolorem architecto ut pariatur quae qui suscipit",
+       body: "nihil ea itaque libero illo\nofficiis quo quo dicta inventore consequatur voluptas voluptatem\ncorporis sed necessitatibus velit tempore\nrerum velit et temporibus"
+     },
+     %Comment{
+       id: 33,
+       post_id: 7,
+       name: "voluptatum totam vel voluptate omnis",
+       body: "fugit harum quae vero\nlibero unde tempore\nsoluta eaque culpa sequi quibusdam nulla id\net et necessitatibus"
+     },
+     %Comment{
+       id: 34,
+       post_id: 7,
+       name: "omnis nemo sunt ab autem",
+       body: "omnis temporibus quasi ab omnis\nfacilis et omnis illum quae quasi aut\nminus iure ex rem ut reprehenderit\nin non fugit"
+     },
+     %Comment{
+       id: 35,
+       post_id: 7,
+       name: "repellendus sapiente omnis praesentium aliquam ipsum id molestiae omnis",
+       body: "dolor mollitia quidem facere et\nvel est ut\nut repudiandae est quidem dolorem sed atque\nrem quia aut adipisci sunt"
+     },
+     %Comment{
+       id: 36,
+       post_id: 8,
+       name: "sit et quis",
+       body: "aut vero est\ndolor non aut excepturi dignissimos illo nisi aut quas\naut magni quia nostrum provident magnam quas modi maxime\nvoluptatem et molestiae"
+     },
+     %Comment{
+       id: 37,
+       post_id: 8,
+       name: "beatae veniam nemo rerum voluptate quam aspernatur",
+       body: "qui rem amet aut\ncumque maiores earum ut quia sit nam esse qui\niusto aspernatur quis voluptas\ndolorem distinctio ex temporibus rem"
+     },
+     %Comment{
+       id: 38,
+       post_id: 8,
+       name: "maiores dolores expedita",
+       body: "unde voluptatem qui dicta\nvel ad aut eos error consequatur voluptatem\nadipisci doloribus qui est sit aut\nvelit aut et ea ratione eveniet iure fuga"
+     },
+     %Comment{
+       id: 39,
+       post_id: 8,
+       name: "necessitatibus ratione aut ut delectus quae ut",
+       body: "atque consequatur dolorem sunt\nadipisci autem et\nvoluptatibus et quae necessitatibus rerum eaque aperiam nostrum nemo\neligendi sed et beatae et inventore"
+     },
+     ...
+   ]},
+  ...
+]
+```
+
+## Running the searches in turn
+
+The searches of a single hop run concurrently, each in its own task. Where `fetch/3` has to run in the process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the process that opened it, `async: false` makes the calls in turn instead.
+
+```elixir
+Blog.load_many(posts, :comments, async: false)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+fetch Comment by [:post_id] for 10 rows
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  {%Post{
+     id: 1,
+     user_id: 1,
+     title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+     body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+   },
+   [
+     %Comment{
+       id: 1,
+       post_id: 1,
+       name: "id labore ex et quam laborum",
+       body: "laudantium enim quasi est quidem magnam voluptate ipsam eos\ntempora quo necessitatibus\ndolor quam autem quasi\nreiciendis et nam sapiente accusantium"
+     },
+     %Comment{
+       id: 2,
+       post_id: 1,
+       name: "quo vero reiciendis velit similique earum",
+       body: "est natus enim nihil est dolore omnis voluptatem numquam\net omnis occaecati quod ullam at\nvoluptatem error expedita pariatur\nnihil sint nostrum voluptatem reiciendis et"
+     },
+     %Comment{
+       id: 3,
+       post_id: 1,
+       name: "odio adipisci rerum aut animi",
+       body: "quia molestiae reprehenderit quasi aspernatur\naut expedita occaecati aliquam eveniet laudantium\nomnis quibusdam delectus saepe quia accusamus maiores nam est\ncum et ducimus et vero voluptates excepturi deleniti ratione"
+     },
+     %Comment{
+       id: 4,
+       post_id: 1,
+       name: "alias odio sit",
+       body: "non et atque\noccaecati deserunt quas accusantium unde odit nobis qui voluptatem\nquia voluptas consequuntur itaque dolor\net qui rerum deleniti ut occaecati"
+     },
+     %Comment{
+       id: 5,
+       post_id: 1,
+       name: "vero eaque aliquid doloribus et culpa",
+       body: "harum non quasi et ratione\ntempore iure ex voluptates in ratione\nharum architecto fugit inventore cupiditate\nvoluptates magni quo et"
+     }
+   ]},
+  {%Post{
+     id: 2,
+     user_id: 1,
+     title: "qui est esse",
+     body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
+   },
+   [
+     %Comment{
+       id: 6,
+       post_id: 2,
+       name: "et fugit eligendi deleniti quidem qui sint nihil autem",
+       body: "doloribus at sed quis culpa deserunt consectetur qui praesentium\naccusamus fugiat dicta\nvoluptatem rerum ut voluptate autem\nvoluptatem repellendus aspernatur dolorem in"
+     },
+     %Comment{
+       id: 7,
+       post_id: 2,
+       name: "repellat consequatur praesentium vel minus molestias voluptatum",
+       body: "maiores sed dolores similique labore et inventore et\nquasi temporibus esse sunt id et\neos voluptatem aliquam\naliquid ratione corporis molestiae mollitia quia et magnam dolor"
+     },
+     %Comment{
+       id: 8,
+       post_id: 2,
+       name: "et omnis dolorem",
+       body: "ut voluptatem corrupti velit\nad voluptatem maiores\net nisi velit vero accusamus maiores\nvoluptates quia aliquid ullam eaque"
+     },
+     %Comment{
+       id: 9,
+       post_id: 2,
+       name: "provident id voluptas",
+       body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+     },
+     %Comment{
+       id: 10,
+       post_id: 2,
+       name: "eaque et deleniti atque tenetur ut quo ut",
+       body: "voluptate iusto quis nobis reprehenderit ipsum amet nulla\nquia quas dolores velit et non\naut quia necessitatibus\nnostrum quaerat nulla et accusamus nisi facilis"
+     }
+   ]},
+  {%Post{
+     id: 3,
+     user_id: 1,
+     title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+     body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
+   },
+   [
+     %Comment{
+       id: 11,
+       post_id: 3,
+       name: "fugit labore quia mollitia quas deserunt nostrum sunt",
+       body: "ut dolorum nostrum id quia aut est\nfuga est inventore vel eligendi explicabo quis consectetur\naut occaecati repellat id natus quo est\nut blanditiis quia ut vel ut maiores ea"
+     },
+     %Comment{
+       id: 12,
+       post_id: 3,
+       name: "modi ut eos dolores illum nam dolor",
+       body: "expedita maiores dignissimos facilis\nipsum est rem est fugit velit sequi\neum odio dolores dolor totam\noccaecati ratione eius rem velit"
+     },
+     %Comment{
+       id: 13,
+       post_id: 3,
+       name: "aut inventore non pariatur sit vitae voluptatem sapiente",
+       body: "fuga eos qui dolor rerum\ninventore corporis exercitationem\ncorporis cupiditate et deserunt recusandae est sed quis culpa\neum maiores corporis et"
+     },
+     %Comment{
+       id: 14,
+       post_id: 3,
+       name: "et officiis id praesentium hic aut ipsa dolorem repudiandae",
+       body: "vel quae voluptas qui exercitationem\nvoluptatibus unde sed\nminima et qui ipsam aspernatur\nexpedita magnam laudantium et et quaerat ut qui dolorum"
+     },
+     %Comment{
+       id: 15,
+       post_id: 3,
+       name: "debitis magnam hic odit aut ullam nostrum tenetur",
+       body: "nihil ut voluptates blanditiis autem odio dicta rerum\nquisquam saepe et est\nsunt quasi nemo laudantium deserunt\nmolestias tempora quo quia"
+     }
+   ]},
+  {%Post{
+     id: 4,
+     user_id: 1,
+     title: "eum et est occaecati",
+     body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+   },
+   [
+     %Comment{
+       id: 16,
+       post_id: 4,
+       name: "perferendis temporibus delectus optio ea eum ratione dolorum",
+       body: "iste ut laborum aliquid velit facere itaque\nquo ut soluta dicta voluptate\nerror tempore aut et\nsequi reiciendis dignissimos expedita consequuntur libero sed fugiat facilis"
+     },
+     %Comment{
+       id: 17,
+       post_id: 4,
+       name: "eos est animi quis",
+       body: "consequatur necessitatibus totam sed sit dolorum\nrecusandae quae odio excepturi voluptatum harum voluptas\nquisquam sit ad eveniet delectus\ndoloribus odio qui non labore"
+     },
+     %Comment{
+       id: 18,
+       post_id: 4,
+       name: "aut et tenetur ducimus illum aut nulla ab",
+       body: "veritatis voluptates necessitatibus maiores corrupti\nneque et exercitationem amet sit et\nullam velit sit magnam laborum\nmagni ut molestias"
+     },
+     %Comment{
+       id: 19,
+       post_id: 4,
+       name: "sed impedit rerum quia et et inventore unde officiis",
+       body: "doloribus est illo sed minima aperiam\nut dignissimos accusantium tempore atque et aut molestiae\nmagni ut accusamus voluptatem quos ut voluptates\nquisquam porro sed architecto ut"
+     },
+     %Comment{
+       id: 20,
+       post_id: 4,
+       name: "molestias expedita iste aliquid voluptates",
+       body: "qui harum consequatur fugiat\net eligendi perferendis at molestiae commodi ducimus\ndoloremque asperiores numquam qui\nut sit dignissimos reprehenderit tempore"
+     }
+   ]},
+  {%Post{
+     id: 5,
+     user_id: 1,
+     title: "nesciunt quas odio",
+     body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
+   },
+   [
+     %Comment{
+       id: 21,
+       post_id: 5,
+       name: "aliquid rerum mollitia qui a consectetur eum sed",
+       body: "deleniti aut sed molestias explicabo\ncommodi odio ratione nesciunt\nvoluptate doloremque est\nnam autem error delectus"
+     },
+     %Comment{
+       id: 22,
+       post_id: 5,
+       name: "porro repellendus aut tempore quis hic",
+       body: "qui ipsa animi nostrum praesentium voluptatibus odit\nqui non impedit cum qui nostrum aliquid fuga explicabo\nvoluptatem fugit earum voluptas exercitationem temporibus dignissimos distinctio\nesse inventore reprehenderit quidem ut incidunt nihil necessitatibus rerum"
+     },
+     %Comment{
+       id: 23,
+       post_id: 5,
+       name: "quis tempora quidem nihil iste",
+       body: "voluptates provident repellendus iusto perspiciatis ex fugiat ut\nut dolor nam aliquid et expedita voluptate\nsunt vitae illo rerum in quos\nvel eligendi enim quae fugiat est"
+     },
+     %Comment{
+       id: 24,
+       post_id: 5,
+       name: "in tempore eos beatae est",
+       body: "repudiandae repellat quia\nsequi est dolore explicabo nihil et\net sit et\net praesentium iste atque asperiores tenetur"
+     },
+     %Comment{
+       id: 25,
+       post_id: 5,
+       name: "autem ab ea sit alias hic provident sit",
+       body: "sunt aut quae laboriosam sit ut impedit\nadipisci harum laborum totam deleniti voluptas odit rem ea\nnon iure distinctio ut velit doloribus\net non ex"
+     }
+   ]},
+  {%Post{
+     id: 6,
+     user_id: 1,
+     title: "dolorem eum magni eos aperiam quia",
+     body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
+   },
+   [
+     %Comment{
+       id: 26,
+       post_id: 6,
+       name: "in deleniti sunt provident soluta ratione veniam quam praesentium",
+       body: "incidunt sapiente eaque dolor eos\nad est molestias\nquas sit et nihil exercitationem at cumque ullam\nnihil magnam et"
+     },
+     %Comment{
+       id: 27,
+       post_id: 6,
+       name: "doloribus quibusdam molestiae amet illum",
+       body: "nisi vel quas ut laborum ratione\nrerum magni eum\nunde et voluptatem saepe\nvoluptas corporis modi amet ipsam eos saepe porro"
+     },
+     %Comment{
+       id: 28,
+       post_id: 6,
+       name: "quo voluptates voluptas nisi veritatis dignissimos dolores ut officiis",
+       body: "voluptatem repellendus quo alias at laudantium\nmollitia quidem esse\ntemporibus consequuntur vitae rerum illum\nid corporis sit id"
+     },
+     %Comment{
+       id: 29,
+       post_id: 6,
+       name: "eum distinctio amet dolor",
+       body: "tempora voluptatem est\nmagnam distinctio autem est dolorem\net ipsa molestiae odit rerum itaque corporis nihil nam\neaque rerum error"
+     },
+     %Comment{
+       id: 30,
+       post_id: 6,
+       name: "quasi nulla ducimus facilis non voluptas aut",
+       body: "consequuntur quia voluptate assumenda et\nautem voluptatem reiciendis ipsum animi est provident\nearum aperiam sapiente ad vitae iste\naccusantium aperiam eius qui dolore voluptatem et"
+     }
+   ]},
+  {%Post{
+     id: 7,
+     user_id: 1,
+     title: "magnam facilis autem",
+     body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+   }, [%Comment{...}, ...]},
+  ...
+]
+```
