@@ -44,8 +44,7 @@ defmodule Associations do
   the association.
   """
 
-  # The name of the single Dataloader source every association is searched through.
-  @source :loader
+  alias Associations.Resolver
 
   @doc """
   Fetches the records of `schema` matching each of `searches`.
@@ -104,30 +103,31 @@ defmodule Associations do
     from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
     to = Keyword.get(opts, :references, :id)
 
-    {{schema, name}, %{kind: :belongs_to, steps: [step(target, from, to)]}}
+    {{schema, name}, %{kind: :belongs_to, steps: [Resolver.step(target, from, to)]}}
   end
 
   defp define({schema, :has_many, name, target, opts}) do
     from = Keyword.get(opts, :references, :id)
     to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-    {{schema, name}, %{kind: :has_many, steps: [step(target, from, to)]}}
+    {{schema, name}, %{kind: :has_many, steps: [Resolver.step(target, from, to)]}}
   end
 
   defp define({schema, :many_to_many, name, target, opts}) do
     join = Keyword.fetch!(opts, :join_through)
 
-    [{to, from}, {join_from, join_to}] =
+    [{owner_key, owner_reference}, {target_key, target_reference}] =
       Keyword.get_lazy(opts, :join_keys, fn ->
         [{default_foreign_key(schema), :id}, {default_foreign_key(target), :id}]
       end)
 
-    steps = [step(join, from, to), step(target, join_from, join_to)]
+    steps = [
+      Resolver.step(join, owner_reference, owner_key),
+      Resolver.step(target, target_key, target_reference)
+    ]
 
     {{schema, name}, %{kind: :many_to_many, steps: steps}}
   end
-
-  defp step(target, from, to), do: %{target: target, from: from, to: to}
 
   defp default_foreign_key(schema) do
     :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
@@ -136,7 +136,7 @@ defmodule Associations do
   @doc false
   def load(module, %schema{} = record, name) do
     %{kind: kind, steps: steps} = definition!(module, schema, name)
-    [results] = walk(module, [{steps, [record]}])
+    [results] = Resolver.resolve(module, [{record, steps}])
 
     case kind do
       :belongs_to -> one!(results, schema, name)
@@ -157,41 +157,10 @@ defmodule Associations do
       Enum.map(records, fn %schema{} = record ->
         %{steps: steps} = definition!(module, schema, name)
 
-        {steps, [record]}
+        {record, steps}
       end)
 
-    Enum.zip(records, walk(module, walks))
-  end
-
-  defp walk(module, walks) do
-    Dataloader.new()
-    |> Dataloader.add_source(@source, Dataloader.KV.new(&module.fetch/2))
-    |> hop(walks)
-  end
-
-  defp hop(loader, walks) do
-    case Enum.flat_map(walks, &lookups/1) do
-      [] ->
-        Enum.map(walks, fn {_steps, records} -> records end)
-
-      lookups ->
-        loader = run(loader, lookups)
-
-        hop(loader, Enum.map(walks, &advance(&1, loader)))
-    end
-  end
-
-  defp lookups({[step | _steps], records}), do: Enum.map(records, &lookup(step, &1))
-  defp lookups({[], _records}), do: []
-
-  defp advance({[step | steps], records}, loader) do
-    {steps, Enum.flat_map(records, fn record -> get(loader, lookup(step, record)) end)}
-  end
-
-  defp advance({[], records}, _loader), do: {[], records}
-
-  defp lookup(%{target: target, from: from, to: to}, record) do
-    {target, %{to => Map.fetch!(record, from)}}
+    Enum.zip(records, Resolver.resolve(module, walks))
   end
 
   defp definition!(module, schema, name) do
@@ -203,17 +172,6 @@ defmodule Associations do
         raise ArgumentError, "#{inspect(schema)} has no #{inspect(name)} association"
     end
   end
-
-  defp run(loader, lookups) do
-    lookups
-    |> Enum.group_by(fn {target, _search} -> target end, fn {_target, search} -> search end)
-    |> Enum.reduce(loader, fn {target, searches}, loader ->
-      Dataloader.load_many(loader, @source, target, searches)
-    end)
-    |> Dataloader.run()
-  end
-
-  defp get(loader, {target, search}), do: Dataloader.get(loader, @source, target, search)
 
   @doc """
   Declares the associations of `schema`.

@@ -24,8 +24,6 @@ defmodule Associations.MixProject do
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
-    [
-      {:dataloader, "~> 2.0"}
-    ]
+    []
   end
 end
