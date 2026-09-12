@@ -78,19 +78,35 @@ defmodule AssociationsTest do
     stray = %Car{id: 4, color: "green", owner_id: 3}
 
     assert Relations.load_many([car1, car2, car3, stray], :owner) ==
-             [{car1, person1}, {car2, person1}, {car3, person2}, {stray, nil}]
+             [{car1, [person1]}, {car2, [person1]}, {car3, [person2]}, {stray, []}]
   end
 
   test "keeps the order of the records it is given", %{
     persons: [person1, person2],
     cars: [car1, _car2, car3]
   } do
-    assert Relations.load_many([car3, car1], :owner) == [{car3, person2}, {car1, person1}]
+    assert Relations.load_many([car3, car1], :owner) == [{car3, [person2]}, {car1, [person1]}]
 
     assert [{^person2, [^car3]}, {^person1, _cars}] =
              Relations.load_many([person2, person1], :cars)
 
-    assert Relations.load_many([car1, car1], :owner) == [{car1, person1}, {car1, person1}]
+    assert Relations.load_many([car1, car1], :owner) == [{car1, [person1]}, {car1, [person1]}]
+  end
+
+  test "loads the association of records of different schemas at once", %{
+    persons: [person1, _person2],
+    dealers: [dealer1, _dealer2],
+    cars: [car1, car2, _car3]
+  } do
+    assert Garage.batches() == 0
+
+    assert [{^person1, cars1}, {^dealer1, cars2}] =
+             Relations.load_many([person1, dealer1], :cars)
+
+    assert_lists cars1, [car1, car2]
+    assert_lists cars2, [car1, car2]
+
+    assert Garage.batches() == 1
   end
 
   test "returns no results for no records" do

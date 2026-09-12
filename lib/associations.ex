@@ -3,8 +3,8 @@ defmodule Associations do
   Declarative associations between plain structs.
 
   A module that `use`s `Associations` declares a `loader/1` function that knows how to fetch
-  records and one `association/2` block per struct. From those declarations a `load/2` function
-  is generated, with one clause per association.
+  records and one `association/2` block per struct. The declarations are resolved while the
+  module compiles, and `load/2` and `load_many/2` read them to search through the loader.
 
       defmodule Relations do
         use Associations
@@ -30,6 +30,16 @@ defmodule Associations do
 
   A `belongs_to` association returns a single record, or `nil` when none matches. A `has_many`
   association returns a list.
+
+  `load_many/2` searches for many records at once, which is what keeps loading an association
+  over a list from querying once per record. It returns a `{record, records}` pair per record,
+  in the order they were given, always with a list on the right.
+
+      Relations.load_many([person, dealer], :cars)
+      #=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
+
+  The records it is given may be of different schemas, as above, as long as each of them declares
+  the association.
   """
 
   @typedoc "The fields a record is searched by, as passed to the loader function."
@@ -40,79 +50,85 @@ defmodule Associations do
       import Associations,
         only: [loader: 1, association: 2, belongs_to: 2, belongs_to: 3, has_many: 2, has_many: 3]
 
-      Module.register_attribute(__MODULE__, :associations, accumulate: true)
+      Module.register_attribute(__MODULE__, :declarations, accumulate: true)
 
       @before_compile Associations
+
+      @doc "Loads the `name` association of `record`."
+      @spec load(struct, atom) :: struct | [struct] | nil
+      def load(record, name), do: Associations.load(__MODULE__, record, name)
+
+      @doc "Loads the `name` association of every record, searching for all of them at once."
+      @spec load_many([struct], atom) :: [{struct, [struct]}]
+      def load_many(records, name), do: Associations.load_many(__MODULE__, records, name)
     end
   end
 
   defmacro __before_compile__(env) do
-    associations = Module.get_attribute(env.module, :associations)
+    declarations = Module.get_attribute(env.module, :declarations)
+    definitions = Map.new(declarations, &define/1)
 
-    [
-      for {schema, _kind, name, _target, _opts} <- associations do
-        quote do
-          def load(%unquote(schema){} = record, unquote(name)) do
-            [{^record, result}] = load_many([record], unquote(name))
+    quote do
+      @doc false
+      def __definitions__, do: unquote(Macro.escape(definitions))
+    end
+  end
 
-            result
-          end
-        end
-      end,
-      for {schema, :belongs_to, name, target, opts} <- associations do
-        foreign_key = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
-        references = Keyword.get(opts, :references, :id)
+  defp define({schema, :belongs_to, name, target, opts}) do
+    from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
+    to = Keyword.get(opts, :references, :id)
 
-        quote do
-          def load_many([%unquote(schema){} | _] = records, unquote(name)) do
-            searches =
-              Enum.map(records, fn %unquote(schema){unquote(foreign_key) => value} ->
-                %{unquote(references) => value}
-              end)
+    {{schema, name}, %{kind: :belongs_to, target: target, from: from, to: to}}
+  end
 
-            results =
-              __dataloader__()
-              |> Associations.fetch_all(unquote(target), searches)
-              |> Enum.map(&List.first/1)
+  defp define({schema, :has_many, name, target, opts}) do
+    from = Keyword.get(opts, :references, :id)
+    to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-            Enum.zip(records, results)
-          end
-        end
-      end,
-      for {schema, :has_many, name, target, opts} <- associations do
-        foreign_key =
-          Keyword.get_lazy(opts, :foreign_key, fn ->
-            :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
-          end)
+    {{schema, name}, %{kind: :has_many, target: target, from: from, to: to}}
+  end
 
-        references = Keyword.get(opts, :references, :id)
-
-        quote do
-          def load_many([%unquote(schema){} | _] = records, unquote(name)) do
-            searches =
-              Enum.map(records, fn %unquote(schema){unquote(references) => value} ->
-                %{unquote(foreign_key) => value}
-              end)
-
-            results = Associations.fetch_all(__dataloader__(), unquote(target), searches)
-
-            Enum.zip(records, results)
-          end
-        end
-      end,
-      quote do
-        def load_many([], _name), do: []
-      end
-    ]
+  defp default_foreign_key(schema) do
+    :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
   end
 
   @doc false
-  @spec fetch_all(Dataloader.t(), module(), [search()]) :: [term()]
-  def fetch_all(dataloader, schema, searches) do
-    dataloader
-    |> Dataloader.load_many(:loader, schema, searches)
-    |> Dataloader.run()
-    |> Dataloader.get_many(:loader, schema, searches)
+  def load(module, %schema{} = record, name) do
+    [{^record, results}] = load_many(module, [record], name)
+
+    case Map.fetch!(module.__definitions__(), {schema, name}) do
+      %{kind: :belongs_to} -> List.first(results)
+      %{kind: :has_many} -> results
+    end
+  end
+
+  @doc false
+  def load_many(module, records, name) when is_list(records) do
+    definitions = module.__definitions__()
+
+    lookups =
+      Enum.map(records, fn %schema{} = record ->
+        %{target: target, from: from, to: to} = Map.fetch!(definitions, {schema, name})
+
+        {target, %{to => Map.fetch!(record, from)}}
+      end)
+
+    results = fetch_all(module.__dataloader__(), lookups)
+
+    Enum.zip(records, results)
+  end
+
+  defp fetch_all(dataloader, lookups) do
+    dataloader =
+      lookups
+      |> Enum.reduce(dataloader, fn {schema, search}, dataloader ->
+        Dataloader.load(dataloader, :loader, schema, search)
+      end)
+      |> Dataloader.run()
+
+    Enum.map(lookups, fn {schema, search} ->
+      Dataloader.get(dataloader, :loader, schema, search)
+    end)
   end
 
   @doc """
@@ -186,7 +202,7 @@ defmodule Associations do
   @spec belongs_to(atom(), module(), keyword()) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
     quote do
-      @associations {@association_schema, :belongs_to, unquote(name), unquote(schema),
+      @declarations {@association_schema, :belongs_to, unquote(name), unquote(schema),
                      unquote(opts)}
     end
   end
@@ -214,7 +230,7 @@ defmodule Associations do
   @spec has_many(atom(), module(), keyword()) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
     quote do
-      @associations {@association_schema, :has_many, unquote(name), unquote(schema),
+      @declarations {@association_schema, :has_many, unquote(name), unquote(schema),
                      unquote(opts)}
     end
   end
