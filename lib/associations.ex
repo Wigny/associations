@@ -9,6 +9,8 @@ defmodule Associations do
       defmodule Garage do
         use Associations
 
+        alias Garage.{Car, Customer}
+
         @impl true
         def fetch(schema, fields, values) do
           Store.list_by(schema, fields, values)
@@ -23,38 +25,18 @@ defmodule Associations do
         end
       end
 
-      Garage.load(customer, :cars)
-      #=> [%Car{id: 1, owner_id: 1}, %Car{id: 2, owner_id: 1}]
+      iex> Garage.load(%Garage.Customer{id: 1}, :cars)
+      [
+        %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
+        %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
+      ]
 
-      Garage.load(car, :owner)
-      #=> %Customer{id: 1}
+      iex> Garage.load(%Garage.Car{owner_id: 1}, :owner)
+      %Garage.Customer{id: 1, name: "John"}
 
-  A `belongs_to` association returns a single record, or `nil` when none matches; it raises when
-  more than one does. A `has_many` association returns a list, and so does a `many_to_many` one,
-  which searches the join schema before the associated one.
-
-  `load_many/2` searches for many records at once, which is what keeps loading an association
-  over a list from querying once per record. It returns a `{record, records}` pair per record,
-  in the order they were given, always with a list on the right.
-
-      Garage.load_many([customer, dealer], :cars)
-      #=> [{%Customer{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
-
-  The records it is given may be of different schemas, as above, as long as each of them declares
-  the association. Records looking for the same thing are searched for once.
-
-  Both functions take a path of associations as well as a single one, walking one association of
-  the records the one before it found, the way `get_in/2` walks a nested map. Every hop is
-  searched for in its own batch, no matter how many records reached it, and the records the last
-  hop found are returned without repeats.
-
-      Garage.load(customer, [:cars, :dealer])
-      #=> [%Dealer{code: "AAA"}]
-
-  A path returns a single record only when every association along it is a `belongs_to`; one
-  `has_many` or `many_to_many` anywhere in it makes the result a list. The records the hops in
-  between found are not returned, so a path tells you which records it ended on, not which of the
-  records before them led there.
+  A `belongs_to` association returns a single record, a `has_many` and a `many_to_many` a list.
+  `load/2` walks one record and `load_many/2` walks many at once, and both take a path of
+  associations as well as a single one.
   """
 
   alias Associations.Resolver
@@ -127,6 +109,18 @@ defmodule Associations do
       @doc """
       Loads the association `path` of `record`, either one name or a list of them.
 
+      Returns a single record, or `nil`, when every association along `path` is a `belongs_to`;
+      one `has_many` or `many_to_many` anywhere in it makes the result a list.
+
+      A path walks one association of the records the one before it found, the way `get_in/2`
+      walks a nested map. Every hop is searched for in its own batch, no matter how many records
+      reached it, and the records the last hop found are returned without repeats. The records the
+      hops in between found are not returned, so a path tells you which records it ended on, not
+      which of the records before them led there.
+
+          iex> Garage.load(%Garage.Customer{id: 1}, [:cars, :dealer])
+          [%Garage.Dealer{code: "AAA", name: "Anne"}]
+
       ## Options
 
         * `:async` - whether the searches of a single hop are run concurrently, each in its own
@@ -141,6 +135,30 @@ defmodule Associations do
 
       @doc """
       Loads the association `path` of every record, searching for all of them at once.
+
+      This is what keeps loading an association over a list from querying once per record. Returns
+      a `{record, records}` pair per record, in the order they were given, always with a list on
+      the right, whatever the kind of the associations along `path`.
+
+      The records given may be of different schemas, as long as each of them declares the
+      association. Records looking for the same thing are searched for once.
+
+          iex> customer = %Garage.Customer{id: 1, name: "John"}
+          iex> dealer = %Garage.Dealer{code: "BBB", name: "Bill"}
+          iex> Garage.load_many([customer, dealer], :cars)
+          [
+            {
+              %Garage.Customer{id: 1, name: "John"},
+              [
+                %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
+                %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
+              ]
+            },
+            {
+              %Garage.Dealer{code: "BBB", name: "Bill"},
+              [%Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}]
+            }
+          ]
 
       Takes the same options as `load/3`.
       """
@@ -178,7 +196,7 @@ defmodule Associations do
   Declares that the enclosing schema holds the foreign key pointing to `schema`.
 
   `load/2` reads the foreign key off the struct and searches `schema` by its primary key,
-  returning a single record or `nil`.
+  returning a single record, or `nil` when none matches. It raises when more than one does.
 
       association Car do
         belongs_to :owner, Customer

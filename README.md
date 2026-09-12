@@ -8,6 +8,8 @@ Structs that come from anywhere (an API client, an ETS table, a context function
 defmodule Garage do
   use Associations
 
+  alias Garage.{Car, Customer}
+
   @impl true
   def fetch(schema, fields, values) do
     Store.list_by(schema, fields, values)
@@ -31,9 +33,7 @@ Garage.load_many([customer, dealer], :cars)
 #=> [{%Customer{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 ```
 
-The `Associations` documentation covers association paths, the `Associations.belongs_to/3`,
-`Associations.has_many/3` and `Associations.many_to_many/3` declarations, and the
-`c:Associations.fetch/3` callback every search goes through.
+See `Associations` for the full documentation.
 
 ## Installation
 

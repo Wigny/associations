@@ -1,6 +1,7 @@
 defmodule AssociationsTest do
   use ExUnit.Case
   doctest Associations
+  doctest Garage
 
   alias Garage.Car
   alias Garage.Compatibility
