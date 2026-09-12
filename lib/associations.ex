@@ -6,12 +6,12 @@ defmodule Associations do
   fetch records, and declares one `association/2` block per struct. The declarations are resolved
   while the module compiles, and `load/2` and `load_many/2` read them to search through `c:fetch/3`.
 
-      defmodule Relations do
+      defmodule Garage do
         use Associations
 
         @impl true
         def fetch(schema, fields, values) do
-          Garage.list_by(schema, fields, values)
+          Store.list_by(schema, fields, values)
         end
 
         association Car do
@@ -23,10 +23,10 @@ defmodule Associations do
         end
       end
 
-      Relations.load(person, :cars)
+      Garage.load(person, :cars)
       #=> [%Car{id: 1, owner_id: 1}, %Car{id: 2, owner_id: 1}]
 
-      Relations.load(car, :owner)
+      Garage.load(car, :owner)
       #=> %Person{id: 1}
 
   A `belongs_to` association returns a single record, or `nil` when none matches; it raises when
@@ -37,7 +37,7 @@ defmodule Associations do
   over a list from querying once per record. It returns a `{record, records}` pair per record,
   in the order they were given, always with a list on the right.
 
-      Relations.load_many([person, dealer], :cars)
+      Garage.load_many([person, dealer], :cars)
       #=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 
   The records it is given may be of different schemas, as above, as long as each of them declares
@@ -48,7 +48,7 @@ defmodule Associations do
   searched for in its own batch, no matter how many records reached it, and the records the last
   hop found are returned without repeats.
 
-      Relations.load(person, [:cars, :dealer])
+      Garage.load(person, [:cars, :dealer])
       #=> [%Dealer{code: "AAA"}]
 
   A path returns a single record only when every association along it is a `belongs_to`; one
@@ -72,7 +72,7 @@ defmodule Associations do
 
       @impl true
       def fetch(Car, [:owner_id], values) do
-        Garage.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
+        Store.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
       end
 
       def fetch(Part, [:manufacturer_code, :part_number], values) do
@@ -84,7 +84,7 @@ defmodule Associations do
 
       @impl true
       def fetch(schema, fields, values) do
-        Garage.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
+        Store.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
       end
 
   The records are returned as a flat list, in any order between rows and in the order they are
