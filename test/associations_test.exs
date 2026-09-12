@@ -109,6 +109,13 @@ defmodule AssociationsTest do
     assert Garage.batches() == 1
   end
 
+  test "raises for an association the schema does not declare", %{persons: [person1, _person2]} do
+    message = "Garage.Person has no :licences association"
+
+    assert_raise ArgumentError, message, fn -> Relations.load(person1, :licences) end
+    assert_raise ArgumentError, message, fn -> Relations.load_many([person1], :licences) end
+  end
+
   test "returns no results for no records" do
     assert Relations.load_many([], :cars) == []
   end

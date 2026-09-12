@@ -42,8 +42,8 @@ defmodule Associations do
   the association.
   """
 
-  @typedoc "The fields a record is searched by, as passed to the loader function."
-  @type search :: %{atom() => term()}
+  # The name of the single Dataloader source every association is searched through.
+  @source :loader
 
   defmacro __using__(_opts) do
     quote do
@@ -96,7 +96,7 @@ defmodule Associations do
   def load(module, %schema{} = record, name) do
     [{^record, results}] = load_many(module, [record], name)
 
-    case Map.fetch!(module.__definitions__(), {schema, name}) do
+    case definition!(module, schema, name) do
       %{kind: :belongs_to} -> List.first(results)
       %{kind: :has_many} -> results
     end
@@ -104,11 +104,9 @@ defmodule Associations do
 
   @doc false
   def load_many(module, records, name) when is_list(records) do
-    definitions = module.__definitions__()
-
     lookups =
       Enum.map(records, fn %schema{} = record ->
-        %{target: target, from: from, to: to} = Map.fetch!(definitions, {schema, name})
+        %{target: target, from: from, to: to} = definition!(module, schema, name)
 
         {target, %{to => Map.fetch!(record, from)}}
       end)
@@ -118,16 +116,26 @@ defmodule Associations do
     Enum.zip(records, results)
   end
 
+  defp definition!(module, schema, name) do
+    case Map.fetch(module.__definitions__(), {schema, name}) do
+      {:ok, definition} ->
+        definition
+
+      :error ->
+        raise ArgumentError, "#{inspect(schema)} has no #{inspect(name)} association"
+    end
+  end
+
   defp fetch_all(dataloader, lookups) do
     dataloader =
       lookups
       |> Enum.reduce(dataloader, fn {schema, search}, dataloader ->
-        Dataloader.load(dataloader, :loader, schema, search)
+        Dataloader.load(dataloader, @source, schema, search)
       end)
       |> Dataloader.run()
 
     Enum.map(lookups, fn {schema, search} ->
-      Dataloader.get(dataloader, :loader, schema, search)
+      Dataloader.get(dataloader, @source, schema, search)
     end)
   end
 
@@ -151,7 +159,7 @@ defmodule Associations do
       def __dataloader__ do
         Dataloader.add_source(
           Dataloader.new(),
-          :loader,
+          unquote(@source),
           Dataloader.KV.new(unquote(fun))
         )
       end
