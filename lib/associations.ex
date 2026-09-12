@@ -112,9 +112,10 @@ defmodule Associations do
 
   @doc false
   def load(module, %schema{} = record, name) do
-    [{^record, results}] = load_many(module, [record], name)
+    definition = definition!(module, schema, name)
+    [results] = fetch_all(module, [lookup(definition, record)])
 
-    case definition!(module, schema, name) do
+    case definition do
       %{kind: :belongs_to} -> one!(results, schema, name)
       %{kind: :has_many} -> results
     end
@@ -131,14 +132,14 @@ defmodule Associations do
   def load_many(module, records, name) when is_list(records) do
     lookups =
       Enum.map(records, fn %schema{} = record ->
-        %{target: target, from: from, to: to} = definition!(module, schema, name)
-
-        {target, %{to => Map.fetch!(record, from)}}
+        module |> definition!(schema, name) |> lookup(record)
       end)
 
-    results = fetch_all(module, lookups)
+    Enum.zip(records, fetch_all(module, lookups))
+  end
 
-    Enum.zip(records, results)
+  defp lookup(%{target: target, from: from, to: to}, record) do
+    {target, %{to => Map.fetch!(record, from)}}
   end
 
   defp definition!(module, schema, name) do
@@ -152,19 +153,17 @@ defmodule Associations do
   end
 
   defp fetch_all(module, lookups) do
-    source = Dataloader.KV.new(&module.fetch/2)
-    dataloader = Dataloader.add_source(Dataloader.new(), @source, source)
+    loader = Dataloader.add_source(Dataloader.new(), @source, Dataloader.KV.new(&module.fetch/2))
 
-    dataloader =
+    loader =
       lookups
-      |> Enum.reduce(dataloader, fn {schema, search}, dataloader ->
-        Dataloader.load(dataloader, @source, schema, search)
+      |> Enum.group_by(fn {target, _search} -> target end, fn {_target, search} -> search end)
+      |> Enum.reduce(loader, fn {target, searches}, loader ->
+        Dataloader.load_many(loader, @source, target, searches)
       end)
       |> Dataloader.run()
 
-    Enum.map(lookups, fn {schema, search} ->
-      Dataloader.get(dataloader, @source, schema, search)
-    end)
+    Enum.map(lookups, fn {target, search} -> Dataloader.get(loader, @source, target, search) end)
   end
 
   @doc """
