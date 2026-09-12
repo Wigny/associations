@@ -29,9 +29,9 @@ defmodule Associations do
       Relations.load(car, :owner)
       #=> %Person{id: 1}
 
-  A `belongs_to` association returns a single record, or `nil` when none matches. A `has_many`
-  association returns a list, and so does a `many_to_many` one, which searches the join schema
-  before the associated one.
+  A `belongs_to` association returns a single record, or `nil` when none matches; it raises when
+  more than one does. A `has_many` association returns a list, and so does a `many_to_many` one,
+  which searches the join schema before the associated one.
 
   `load_many/2` searches for many records at once, which is what keeps loading an association
   over a list from querying once per record. It returns a `{record, records}` pair per record,
@@ -41,7 +41,7 @@ defmodule Associations do
       #=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 
   The records it is given may be of different schemas, as above, as long as each of them declares
-  the association.
+  the association. Records looking for the same thing are searched for once.
 
   Both functions take a path of associations as well as a single one, walking one association of
   the records the one before it found, the way `get_in/2` walks a nested map. Every hop is

@@ -15,77 +15,25 @@ defmodule Relations do
 
   association Car do
     belongs_to :owner, Person
-    belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
   end
 
   association Person do
     has_many :cars, Car, foreign_key: :owner_id
-    has_many :invoices, Invoice
   end
 end
 ```
 
 ```elixir
-Relations.load(person, :cars)
-#=> [%Car{id: 1, owner_id: 1}, %Car{id: 2, owner_id: 1}]
-
 Relations.load(car, :owner)
 #=> %Person{id: 1}
-```
 
-A `belongs_to` association returns a single record, or `nil` when none matches; it raises when more than one does. A `has_many` association returns a list.
-
-## Loading without N+1
-
-`load/2` in a loop searches once per record. `load_many/2` searches for all of them at once, returning a `{record, records}` pair per record, in the order they were given:
-
-```elixir
 Relations.load_many([person, dealer], :cars)
 #=> [{%Person{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
 ```
 
-The records may be of different schemas, as above, as long as each declares the association. Records looking for the same thing are searched for once.
-
-## Paths
-
-Both functions take a path of associations as well as a single one, walking one association of the records the one before it found, the way `get_in/2` walks a nested map:
-
-```elixir
-Relations.load(person, [:cars, :dealer])
-#=> [%Dealer{code: "AAA"}]
-```
-
-Every hop is searched for in its own batch, no matter how many records reached it, so the path above is two searches whether it starts from one person or a hundred. The records the last hop found are returned without repeats, so the dealer who sold both cars is listed once.
-
-A path returns a single record only when every association along it is a `belongs_to`; one `has_many` or `many_to_many` anywhere in it makes the result a list, as above. The records the hops in between found are not returned, so a path tells you which records it ended on, not which of the records before them led there.
-
-## Fetching
-
-Every association goes through the single `fetch/3` callback. It receives the schema being loaded, the fields to search it by, and one row of values per record being searched for, and returns a flat list of records. It is asked for every row at once, so it is meant to be answered with one query, one request or one lookup, whatever the records come from:
-
-```elixir
-@impl true
-def fetch(Car, [:owner_id], values) do
-  Garage.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
-end
-
-def fetch(Part, [:manufacturer_code, :part_number], values) do
-  Catalogue.list_parts(Enum.map(values, fn [code, number] -> {code, number} end))
-end
-```
-
-Matching the fields in the head fixes the shape of a row, as above. A clause that leaves them open answers every schema at once, and zips them onto each row to say which value belongs to which field:
-
-```elixir
-@impl true
-def fetch(schema, fields, values) do
-  Garage.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
-end
-```
-
-The callback has to handle each schema it may be asked for, but nothing more: the records come back as a plain list and `load/2` groups them by `fields` itself, so a record matching none of the rows is ignored and a source that can only answer more coarsely may return more than it was asked for.
-
-A batch is grouped by the fields it searches, so loading one association over records of different schemas calls `fetch/3` once per set of fields, each call holding every row those fields are searched by.
+The `Associations` documentation covers association paths, the `Associations.belongs_to/3`,
+`Associations.has_many/3` and `Associations.many_to_many/3` declarations, and the
+`c:Associations.fetch/3` callback every search goes through.
 
 ## Installation
 
