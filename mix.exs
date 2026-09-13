@@ -42,7 +42,8 @@ defmodule Associations.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
+      {:mox, "~> 1.3", only: :test}
     ]
   end
 end

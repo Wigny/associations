@@ -16,7 +16,7 @@ defmodule Garage do
 
   @impl true
   def fetch(schema, fields, values) do
-    Store.list_by(schema, fields, values)
+    MockStore.list(schema, fields, values)
   end
 
   association Car do
