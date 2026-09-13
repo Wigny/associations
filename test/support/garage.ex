@@ -10,6 +10,7 @@ defmodule Garage do
   alias Garage.Invoice
   alias Garage.Mechanic
   alias Garage.Part
+  alias Garage.Registration
   alias Garage.Service
   alias Garage.Usage
 
@@ -21,6 +22,7 @@ defmodule Garage do
   association Car do
     belongs_to :owner, Customer
     belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
+    has_one :registration, Registration
     many_to_many :mechanics, Mechanic, join_through: Service
 
     many_to_many :compatible_parts, Part,

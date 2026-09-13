@@ -34,9 +34,9 @@ defmodule Associations do
       iex> Garage.load(%Garage.Car{owner_id: 1}, :owner)
       %Garage.Customer{id: 1, name: "John"}
 
-  A `belongs_to` association returns a single record, a `has_many` and a `many_to_many` a list.
-  `load/2` walks one record and `load_many/2` walks many at once, and both take a path of
-  associations as well as a single one.
+  A `belongs_to` and a `has_one` association return a single record, a `has_many` and a
+  `many_to_many` a list. `load/2` walks one record and `load_many/2` walks many at once, and both
+  take a path of associations as well as a single one.
   """
 
   alias Associations.Resolver
@@ -97,6 +97,8 @@ defmodule Associations do
           belongs_to: 3,
           has_many: 2,
           has_many: 3,
+          has_one: 2,
+          has_one: 3,
           many_to_many: 3
         ]
 
@@ -109,8 +111,8 @@ defmodule Associations do
       @doc """
       Loads the association `path` of `record`, either one name or a list of them.
 
-      Returns a single record, or `nil`, when every association along `path` is a `belongs_to`;
-      one `has_many` or `many_to_many` anywhere in it makes the result a list.
+      Returns a single record, or `nil`, when every association along `path` is a `belongs_to` or
+      a `has_one`; one `has_many` or `many_to_many` anywhere in it makes the result a list.
 
       A path walks one association of the records the one before it found, the way `get_in/2`
       walks a nested map. Every hop is searched for in its own batch, no matter how many records
@@ -172,8 +174,8 @@ defmodule Associations do
   @doc """
   Declares the associations of `schema`.
 
-  The block holds `belongs_to/3`, `has_many/3` and `many_to_many/3` declarations, all of them read
-  from a `schema` struct.
+  The block holds `belongs_to/3`, `has_many/3`, `has_one/3` and `many_to_many/3` declarations, all
+  of them read from a `schema` struct.
 
       association Car do
         belongs_to :owner, Customer
@@ -265,6 +267,25 @@ defmodule Associations do
   end
 
   @doc """
+  Declares that `schema` holds the foreign key pointing to the enclosing schema, one record of it.
+
+  Searched for the way `has_many/3` is, taking the same options, but returning a single record, or
+  `nil` when none matches. It raises when more than one does.
+
+      association Car do
+        has_one :registration, Registration
+      end
+
+  See `has_many/3` for the keys and their defaults.
+  """
+  @spec has_one(atom, module, keyword) :: Macro.t()
+  defmacro has_one(name, schema, opts \\ []) do
+    quote do
+      @declarations {@association_schema, :has_one, unquote(name), unquote(schema), unquote(opts)}
+    end
+  end
+
+  @doc """
   Declares that the enclosing schema and `schema` point at each other through a join schema.
 
   `load/2` reads the primary key off the struct and searches the join schema by the foreign key
@@ -322,11 +343,11 @@ defmodule Associations do
     {{schema, name}, %{kind: :belongs_to, steps: [step!(schema, name, target, from, to)]}}
   end
 
-  defp define({schema, :has_many, name, target, opts}) do
+  defp define({schema, kind, name, target, opts}) when kind in [:has_many, :has_one] do
     from = Keyword.get(opts, :references, :id)
     to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-    {{schema, name}, %{kind: :has_many, steps: [step!(schema, name, target, from, to)]}}
+    {{schema, name}, %{kind: kind, steps: [step!(schema, name, target, from, to)]}}
   end
 
   defp define({schema, :many_to_many, name, target, opts}) do
@@ -367,7 +388,7 @@ defmodule Associations do
     {kinds, steps} = walk!(module, schema, path)
     [results] = Resolver.resolve(module, [{record, steps}], opts)
 
-    if Enum.all?(kinds, &(&1 == :belongs_to)) do
+    if Enum.all?(kinds, &(&1 in [:belongs_to, :has_one])) do
       one!(results, schema, path)
     else
       results

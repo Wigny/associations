@@ -10,6 +10,7 @@ defmodule AssociationsTest do
   alias Garage.Invoice
   alias Garage.Mechanic
   alias Garage.Part
+  alias Garage.Registration
   alias Garage.Service
   alias Garage.Usage
 
@@ -21,6 +22,8 @@ defmodule AssociationsTest do
     car1 = %Car{id: 1, color: "red", owner_id: customer1.id, dealer_code: dealer1.code}
     car2 = %Car{id: 2, color: "yellow", owner_id: customer1.id, dealer_code: dealer1.code}
     car3 = %Car{id: 3, color: "blue", owner_id: customer2.id, dealer_code: dealer2.code}
+    registration1 = %Registration{plate: "XYZ 123", car_id: car1.id}
+    registration2 = %Registration{plate: "ABC 987", car_id: car2.id}
     invoice1 = %Invoice{id: 1, total: 100, customer_id: customer1.id}
     invoice2 = %Invoice{id: 2, total: 250, customer_id: customer1.id}
     mechanic1 = %Mechanic{id: 1, name: "Sam"}
@@ -46,6 +49,8 @@ defmodule AssociationsTest do
       car1,
       car2,
       car3,
+      registration1,
+      registration2,
       invoice1,
       invoice2,
       mechanic1,
@@ -68,6 +73,7 @@ defmodule AssociationsTest do
       customers: [customer1, customer2],
       dealers: [dealer1, dealer2],
       cars: [car1, car2, car3],
+      registrations: [registration1, registration2],
       invoices: [invoice1, invoice2],
       mechanics: [mechanic1, mechanic2],
       services: [service1, service2, service3],
@@ -91,6 +97,33 @@ defmodule AssociationsTest do
   } do
     assert Garage.load(customer1, :invoices) == [invoice1, invoice2]
     assert Garage.load(customer2, :invoices) == []
+  end
+
+  test "loads a has_one association", %{
+    cars: [car1, car2, car3],
+    registrations: [registration1, registration2]
+  } do
+    assert Garage.load(car1, :registration) == registration1
+    assert Garage.load(car2, :registration) == registration2
+    assert Garage.load(car3, :registration) == nil
+  end
+
+  test "loads a has_one association for many records at once", %{
+    cars: [car1, car2, car3],
+    registrations: [registration1, registration2]
+  } do
+    assert Garage.load_many([car1, car2, car3], :registration) ==
+             [{car1, [registration1]}, {car2, [registration2]}, {car3, []}]
+  end
+
+  test "raises when a has_one association finds more than one record", %{
+    cars: [car1, _car2, _car3]
+  } do
+    Store.put([%Registration{plate: "DUP 456", car_id: car1.id}])
+
+    assert_raise RuntimeError,
+                 "the :registration association of Garage.Car found 2 records",
+                 fn -> Garage.load(car1, :registration) end
   end
 
   test "loads a many_to_many association", %{
@@ -411,6 +444,21 @@ defmodule AssociationsTest do
     assert Garage.load(%Service{id: 4, cost: 10, car_id: 3}, [:car, :owner]) == customer2
     assert Garage.load(%Service{id: 4, cost: 10, car_id: nil}, [:car, :owner]) == nil
     assert Garage.load(%Service{id: 4, cost: 10, car_id: 9}, [:car, :owner]) == nil
+  end
+
+  test "returns a single record for a path of belongs_to and has_one associations", %{
+    registrations: [registration1, _registration2],
+    services: [service1, _service2, _service3]
+  } do
+    assert Garage.load(service1, [:car, :registration]) == registration1
+    assert Garage.load(%Service{id: 4, cost: 10, car_id: 3}, [:car, :registration]) == nil
+  end
+
+  test "returns a list for a path holding a has_one after a has_many", %{
+    customers: [customer1, _customer2],
+    registrations: [registration1, registration2]
+  } do
+    assert Garage.load(customer1, [:cars, :registration]) == [registration1, registration2]
   end
 
   test "returns a list for a path holding an association other than belongs_to", %{
