@@ -126,38 +126,38 @@ defmodule AssociationsTest do
                  fn -> Garage.load(car1, :registration) end
   end
 
-  test "loads a many_to_many association", %{
+  test "loads a path through a join schema", %{
     cars: [car1, car2, car3],
     mechanics: [mechanic1, mechanic2]
   } do
-    assert Garage.load(car1, :mechanics) == [mechanic1, mechanic2]
-    assert Garage.load(car2, :mechanics) == [mechanic1]
-    assert Garage.load(car3, :mechanics) == []
+    assert Garage.load(car1, [:services, :mechanic]) == [mechanic1, mechanic2]
+    assert Garage.load(car2, [:services, :mechanic]) == [mechanic1]
+    assert Garage.load(car3, [:services, :mechanic]) == []
 
-    assert Garage.load(mechanic1, :cars) == [car1, car2]
-    assert Garage.load(mechanic2, :cars) == [car1]
-    assert Garage.load(%Mechanic{id: 3, name: "Ivo"}, :cars) == []
+    assert Garage.load(mechanic1, [:services, :car]) == [car1, car2]
+    assert Garage.load(mechanic2, [:services, :car]) == [car1]
+    assert Garage.load(%Mechanic{id: 3, name: "Ivo"}, [:services, :car]) == []
   end
 
-  test "loads a many_to_many association for many records at once", %{
+  test "loads a path through a join schema for many records at once", %{
     cars: [car1, car2, car3],
     mechanics: [mechanic1, mechanic2]
   } do
     assert Store.batches() == 0
 
-    assert Garage.load_many([car1, car2, car3], :mechanics) ==
+    assert Garage.load_many([car1, car2, car3], [:services, :mechanic]) ==
              [{car1, [mechanic1, mechanic2]}, {car2, [mechanic1]}, {car3, []}]
 
     assert Store.batches() == 2
   end
 
-  test "loads a many_to_many association through the join keys it is given", %{
+  test "loads a path whose hops key on fields other than :id", %{
     customers: [customer1, customer2],
     dealers: [dealer1, dealer2]
   } do
-    assert Garage.load(dealer1, :customers) == [customer1]
-    assert Garage.load(dealer2, :customers) == [customer2]
-    assert Garage.load(%Dealer{code: "CCC", name: "Cleo"}, :customers) == []
+    assert Garage.load(dealer1, [:cars, :owner]) == [customer1]
+    assert Garage.load(dealer2, [:cars, :owner]) == [customer2]
+    assert Garage.load(%Dealer{code: "CCC", name: "Cleo"}, [:cars, :owner]) == []
   end
 
   test "loads a belongs_to association", %{
@@ -269,13 +269,13 @@ defmodule AssociationsTest do
     assert Garage.load(part3, :usages) == [usage2]
   end
 
-  test "loads a many_to_many association whose join keys hold more than one field", %{
+  test "loads a path whose hops key on more than one field", %{
     cars: [car1, car2, car3],
     parts: [part1, _part2, part3]
   } do
-    assert Garage.load(car1, :compatible_parts) == [part1, part3]
-    assert Garage.load(car2, :compatible_parts) == [part1]
-    assert Garage.load(car3, :compatible_parts) == []
+    assert Garage.load(car1, [:compatibilities, :part]) == [part1, part3]
+    assert Garage.load(car2, [:compatibilities, :part]) == [part1]
+    assert Garage.load(car3, [:compatibilities, :part]) == []
   end
 
   test "fetches every row a set of fields is searched by in a single call", %{
@@ -417,9 +417,9 @@ defmodule AssociationsTest do
     customers: [customer1, customer2],
     mechanics: [mechanic1, mechanic2]
   } do
-    assert Garage.load(customer1, [:cars, :mechanics]) == [mechanic1, mechanic2]
-    assert Garage.load(customer2, [:cars, :mechanics]) == []
-    assert Garage.load(%Customer{id: 3, name: "Ann"}, [:cars, :mechanics]) == []
+    assert Garage.load(customer1, [:cars, :services, :mechanic]) == [mechanic1, mechanic2]
+    assert Garage.load(customer2, [:cars, :services, :mechanic]) == []
+    assert Garage.load(%Customer{id: 3, name: "Ann"}, [:cars, :services, :mechanic]) == []
   end
 
   test "loads a path of one association", %{
@@ -475,7 +475,7 @@ defmodule AssociationsTest do
   } do
     Store.put([%Service{id: 4, cost: 20, car_id: car3.id, mechanic_id: mechanic1.id}])
 
-    assert Garage.load_many([customer1, customer2], [:cars, :mechanics]) ==
+    assert Garage.load_many([customer1, customer2], [:cars, :services, :mechanic]) ==
              [{customer1, [mechanic1, mechanic2]}, {customer2, [mechanic1]}]
   end
 
@@ -485,14 +485,14 @@ defmodule AssociationsTest do
   } do
     stranger = %Customer{id: 3, name: "Ann"}
 
-    assert Garage.load_many([customer2, customer1, stranger], [:cars, :mechanics]) ==
+    assert Garage.load_many([customer2, customer1, stranger], [:cars, :services, :mechanic]) ==
              [{customer2, []}, {customer1, [mechanic1, mechanic2]}, {stranger, []}]
   end
 
   test "searches once per hop of a path", %{customers: [customer1, customer2]} do
     assert Store.batches() == 0
 
-    Garage.load_many([customer1, customer2], [:cars, :mechanics])
+    Garage.load_many([customer1, customer2], [:cars, :services, :mechanic])
 
     assert Store.batches() == 3
   end
@@ -502,7 +502,7 @@ defmodule AssociationsTest do
     dealers: [dealer1, _dealer2],
     mechanics: [mechanic1, mechanic2]
   } do
-    assert Garage.load_many([customer1, dealer1], [:cars, :mechanics]) ==
+    assert Garage.load_many([customer1, dealer1], [:cars, :services, :mechanic]) ==
              [{customer1, [mechanic1, mechanic2]}, {dealer1, [mechanic1, mechanic2]}]
   end
 

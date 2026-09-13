@@ -34,9 +34,9 @@ defmodule Associations do
       iex> Garage.load(%Garage.Car{owner_id: 1}, :owner)
       %Garage.Customer{id: 1, name: "John"}
 
-  A `belongs_to` and a `has_one` association return a single record, a `has_many` and a
-  `many_to_many` a list. `load/2` walks one record and `load_many/2` walks many at once, and both
-  take a path of associations as well as a single one.
+  A `belongs_to` and a `has_one` association return a single record, a `has_many` a list. `load/2`
+  walks one record and `load_many/2` walks many at once, and both take a path of associations as
+  well as a single one.
   """
 
   alias Associations.Resolver
@@ -89,7 +89,7 @@ defmodule Associations do
   @callback fetch(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
 
   defmacro __using__(_opts) do
-    quote do
+    quote generated: true do
       import Associations,
         only: [
           association: 2,
@@ -98,8 +98,7 @@ defmodule Associations do
           has_many: 2,
           has_many: 3,
           has_one: 2,
-          has_one: 3,
-          many_to_many: 3
+          has_one: 3
         ]
 
       @behaviour Associations
@@ -112,7 +111,7 @@ defmodule Associations do
       Loads the association `path` of `record`, either one name or a list of them.
 
       Returns a single record, or `nil`, when every association along `path` is a `belongs_to` or
-      a `has_one`; one `has_many` or `many_to_many` anywhere in it makes the result a list.
+      a `has_one`; one `has_many` anywhere in it makes the result a list.
 
       A path walks one association of the records the one before it found, the way `get_in/2`
       walks a nested map. Every hop is searched for in its own batch, no matter how many records
@@ -174,8 +173,8 @@ defmodule Associations do
   @doc """
   Declares the associations of `schema`.
 
-  The block holds `belongs_to/3`, `has_many/3`, `has_one/3` and `many_to_many/3` declarations, all
-  of them read from a `schema` struct.
+  The block holds `belongs_to/3`, `has_many/3` and `has_one/3` declarations, all of them read from
+  a `schema` struct.
 
       association Car do
         belongs_to :owner, Customer
@@ -285,47 +284,6 @@ defmodule Associations do
     end
   end
 
-  @doc """
-  Declares that the enclosing schema and `schema` point at each other through a join schema.
-
-  `load/2` reads the primary key off the struct and searches the join schema by the foreign key
-  pointing at it, then searches `schema` for the records those join records point at, returning a
-  list. The two searches are two separate batches.
-
-      association Car do
-        many_to_many :mechanics, Mechanic, join_through: Service
-      end
-
-  ## Options
-
-    * `:join_through` - the schema holding the foreign keys of both sides. Required.
-
-    * `:join_keys` - the two pairs of fields the join schema is searched by, each pairing a field
-      of the join schema with the field it points at. Defaults to the module name of each side,
-      underscored and suffixed with `_id`, pointing at `:id`, so the declaration above is the same
-      as `join_keys: [car_id: :id, mechanic_id: :id]`. Either side of a pair takes a list of
-      fields as well as a single one, for a schema identified by more than one.
-
-      The first pair is always the one pointing at the enclosing schema, so a composite side
-      cannot be written with the keyword syntax unless it is the second.
-
-          association Car do
-            many_to_many :compatible_parts, Part,
-              join_through: Compatibility,
-              join_keys: [
-                {:car_id, :id},
-                {[:manufacturer_code, :part_number], [:manufacturer_code, :part_number]}
-              ]
-          end
-  """
-  @spec many_to_many(atom, module, keyword) :: Macro.t()
-  defmacro many_to_many(name, schema, opts) do
-    quote do
-      @declarations {@association_schema, :many_to_many, unquote(name), unquote(schema),
-                     unquote(opts)}
-    end
-  end
-
   defmacro __before_compile__(env) do
     declarations = Module.get_attribute(env.module, :declarations)
     definitions = Map.new(declarations, &define/1)
@@ -340,30 +298,14 @@ defmodule Associations do
     from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
     to = Keyword.get(opts, :references, :id)
 
-    {{schema, name}, %{kind: :belongs_to, steps: [step!(schema, name, target, from, to)]}}
+    {{schema, name}, {:belongs_to, step!(schema, name, target, from, to)}}
   end
 
   defp define({schema, kind, name, target, opts}) when kind in [:has_many, :has_one] do
     from = Keyword.get(opts, :references, :id)
     to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
 
-    {{schema, name}, %{kind: kind, steps: [step!(schema, name, target, from, to)]}}
-  end
-
-  defp define({schema, :many_to_many, name, target, opts}) do
-    join = Keyword.fetch!(opts, :join_through)
-
-    [{owner_key, owner_reference}, {target_key, target_reference}] =
-      Keyword.get_lazy(opts, :join_keys, fn ->
-        [{default_foreign_key(schema), :id}, {default_foreign_key(target), :id}]
-      end)
-
-    steps = [
-      step!(schema, name, join, owner_reference, owner_key),
-      step!(schema, name, target, target_key, target_reference)
-    ]
-
-    {{schema, name}, %{kind: :many_to_many, steps: steps}}
+    {{schema, name}, {kind, step!(schema, name, target, from, to)}}
   end
 
   defp step!(schema, name, target, from, to) do
@@ -412,15 +354,14 @@ defmodule Associations do
   end
 
   defp walk!(module, schema, path) when is_list(path) do
-    {kinds, steps, _schema} =
-      Enum.reduce(path, {[], [], schema}, fn name, {kinds, steps, schema} ->
-        %{kind: kind, steps: hops} = definition!(module, schema, name)
-        %{target: target} = List.last(hops)
+    {hops, _schema} =
+      Enum.map_reduce(path, schema, fn name, schema ->
+        {_kind, %{target: target}} = hop = definition!(module, schema, name)
 
-        {[kind | kinds], steps ++ hops, target}
+        {hop, target}
       end)
 
-    {kinds, steps}
+    Enum.unzip(hops)
   end
 
   defp walk!(module, schema, name), do: walk!(module, schema, [name])

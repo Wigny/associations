@@ -23,24 +23,24 @@ defmodule Garage do
     belongs_to :owner, Customer
     belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
     has_one :registration, Registration
-    many_to_many :mechanics, Mechanic, join_through: Service
-
-    many_to_many :compatible_parts, Part,
-      join_through: Compatibility,
-      join_keys: [
-        {:car_id, :id},
-        {[:manufacturer_code, :part_number], [:manufacturer_code, :part_number]}
-      ]
+    has_many :services, Service
+    has_many :compatibilities, Compatibility
   end
 
   association Mechanic do
-    many_to_many :cars, Car, join_through: Service
+    has_many :services, Service
   end
 
   association Service do
     belongs_to :car, Car
     belongs_to :mechanic, Mechanic
     has_many :usages, Usage
+  end
+
+  association Compatibility do
+    belongs_to :part, Part,
+      foreign_key: [:manufacturer_code, :part_number],
+      references: [:manufacturer_code, :part_number]
   end
 
   association Part do
@@ -67,9 +67,5 @@ defmodule Garage do
 
   association Dealer do
     has_many :cars, Car, foreign_key: :dealer_code, references: :code
-
-    many_to_many :customers, Customer,
-      join_through: Car,
-      join_keys: [dealer_code: :code, owner_id: :id]
   end
 end
