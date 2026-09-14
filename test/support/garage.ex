@@ -15,7 +15,7 @@ defmodule Garage do
   alias Garage.Usage
 
   @impl true
-  def fetch(schema, fields, values) do
+  def list(schema, fields, values) do
     MockStore.list(schema, fields, values)
   end
 

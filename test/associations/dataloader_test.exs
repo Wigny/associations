@@ -74,7 +74,7 @@ defmodule Associations.DataloaderTest do
   end
 
   describe "batching" do
-    test "loads every record queued under a path in one fetch", %{loader: loader} do
+    test "loads every record queued under a path in one list call", %{loader: loader} do
       customer1 = %Garage.Customer{id: 1, name: "John"}
       customer2 = %Garage.Customer{id: 2, name: "Jane"}
 
@@ -120,7 +120,7 @@ defmodule Associations.DataloaderTest do
              ]
     end
 
-    test "does not fetch a record loaded by an earlier run again", %{loader: loader} do
+    test "does not list a record loaded by an earlier run again", %{loader: loader} do
       customer = %Garage.Customer{id: 2, name: "Jane"}
 
       Mox.expect(MockStore, :list, 1, &ExampleStore.list/3)
@@ -138,7 +138,7 @@ defmodule Associations.DataloaderTest do
              ]
     end
 
-    test "does not fetch a record put into the results", %{loader: loader} do
+    test "does not list a record put into the results", %{loader: loader} do
       customer = %Garage.Customer{id: 2, name: "Jane"}
       car = %Garage.Car{id: 4, color: "green", owner_id: 2}
 
@@ -271,7 +271,7 @@ defmodule Associations.DataloaderTest do
   end
 
   describe "options" do
-    test "fetches in the process calling run when async is false", %{test_pid: caller} do
+    test "lists in the process calling run when async is false", %{test_pid: caller} do
       source = Associations.Dataloader.new(Garage, async: false)
       loader = Dataloader.add_source(Dataloader.new(), :garage, source)
 
@@ -286,7 +286,7 @@ defmodule Associations.DataloaderTest do
       |> Dataloader.run()
     end
 
-    test "fetches in another process when async is true", %{loader: loader, test_pid: caller} do
+    test "lists in another process when async is true", %{loader: loader, test_pid: caller} do
       Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
         refute self() == caller
 

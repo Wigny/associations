@@ -1,9 +1,9 @@
 defmodule Store do
   @moduledoc """
-  The store `Garage` fetches through.
+  The store `Garage` reads through.
 
   Exists as a behaviour because `Mox.defmock/2` defines `MockStore` from one. `Garage` implements
-  `c:Associations.fetch/3` by delegating to `MockStore.list/3`, so every search a test makes lands
+  `c:Associations.list/3` by delegating to `MockStore.list/3`, so every search a test makes lands
   here, and a test says what each one answers with.
   """
 

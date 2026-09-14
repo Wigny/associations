@@ -427,7 +427,7 @@ defmodule AssociationsTest do
              ]
     end
 
-    test "fetches every value a field is searched by in a single call" do
+    test "lists every value a field is searched by in a single call" do
       owner_id1 = 1
       owner_id2 = 2
 
@@ -445,20 +445,20 @@ defmodule AssociationsTest do
       assert Garage.load_many([customer1, customer2], :cars) == [{customer1, []}, {customer2, []}]
     end
 
-    test "fetches the groups of a hop in a process of their own", %{test_pid: caller} do
+    test "lists the groups of a hop in a process of their own", %{test_pid: caller} do
       customer = %Garage.Customer{id: 1}
       dealer = %Garage.Dealer{code: "AAA", name: "Anne"}
 
       Mox.expect(MockStore, :list, 2, fn _schema, _fields, _values ->
-        send(caller, {:fetched, self()})
+        send(caller, {:listed, self()})
 
         []
       end)
 
       Garage.load_many([customer, dealer], :cars)
 
-      assert_received {:fetched, pid1} when pid1 != caller
-      assert_received {:fetched, pid2} when pid2 != caller
+      assert_received {:listed, pid1} when pid1 != caller
+      assert_received {:listed, pid2} when pid2 != caller
 
       assert pid1 != pid2
     end
@@ -593,7 +593,7 @@ defmodule AssociationsTest do
     assert Garage.load(customer, :cars) == [car]
   end
 
-  test "fetches in the process asking for it when async is false", %{test_pid: caller} do
+  test "lists in the process asking for it when async is false", %{test_pid: caller} do
     Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
       assert self() == caller
 
@@ -632,7 +632,7 @@ defmodule AssociationsTest do
                      use Associations
 
                      @impl true
-                     def fetch(_schema, _fields, _values), do: []
+                     def list(_schema, _fields, _values), do: []
 
                      association Garage.Usage do
                        belongs_to :part, Garage.Part,

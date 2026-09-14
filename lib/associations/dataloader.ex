@@ -41,8 +41,8 @@ if Code.ensure_loaded?(Dataloader.Source) do
     ## Options
 
       * `:async` - whether the batches of the source run concurrently, each in its own task, and
-        whether the fetches inside a batch do, as `:async` of `load_many/3`. Defaults to `true`.
-        Pass `false` where `c:Associations.fetch/3` has to run in the process calling
+        whether the searches inside a batch do, as `:async` of `load_many/3`. Defaults to `true`.
+        Pass `false` where `c:Associations.list/3` has to run in the process calling
         `Dataloader.run/1`, such as inside an `Ecto.Repo` transaction.
 
       * `:timeout` - the time, in milliseconds, a batch may take before the whole source fails.

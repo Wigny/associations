@@ -2,9 +2,9 @@ defmodule Associations do
   @moduledoc """
   Declarative associations between plain structs.
 
-  A module that `use`s `Associations` implements the `c:fetch/3` callback, which knows how to
-  fetch records, and declares one `association/2` block per struct. The declarations are resolved
-  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:fetch/3`.
+  A module that `use`s `Associations` implements the `c:list/3` callback, which knows how to
+  list records, and declares one `association/2` block per struct. The declarations are resolved
+  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:list/3`.
 
       defmodule Garage do
         use Associations
@@ -12,7 +12,7 @@ defmodule Associations do
         alias Garage.{Car, Customer}
 
         @impl true
-        def fetch(schema, fields, values) do
+        def list(schema, fields, values) do
           Store.list_by(schema, fields, values)
         end
 
@@ -42,7 +42,7 @@ defmodule Associations do
   alias Associations.Resolver
 
   @doc """
-  Fetches the records of `schema` whose `fields` hold one of `values`.
+  Lists the records of `schema` whose `fields` hold one of `values`.
 
   Every association of the module goes through this single callback, so it must handle each schema
   it may be asked for. It is asked for every value at once, so it is meant to be answered with one
@@ -53,11 +53,11 @@ defmodule Associations do
   a clause written that way can take it apart directly:
 
       @impl true
-      def fetch(Car, [:owner_id], values) do
+      def list(Car, [:owner_id], values) do
         Store.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
       end
 
-      def fetch(Part, [:manufacturer_code, :part_number], values) do
+      def list(Part, [:manufacturer_code, :part_number], values) do
         Catalogue.list_parts(Enum.map(values, fn [code, number] -> {code, number} end))
       end
 
@@ -65,7 +65,7 @@ defmodule Associations do
   to say which value belongs to which field:
 
       @impl true
-      def fetch(schema, fields, values) do
+      def list(schema, fields, values) do
         Store.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
       end
 
@@ -82,11 +82,11 @@ defmodule Associations do
   the order the calls are made in is not defined. A task does not inherit what the process calling
   `load/2` holds, which matters when the records come from a connection checked out to it: an
   `Ecto.Repo` reads its sandbox connection through `$callers`, which a task does carry, but a
-  transaction is bound to the process that opened it, and a fetch running beside it is outside it.
+  transaction is bound to the process that opened it, and a call running beside it is outside it.
   Pass `async: false` to `load/3` or `load_many/3` there, and the calls are made in turn, in the
   process asking for them.
   """
-  @callback fetch(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
+  @callback list(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
 
   defmacro __using__(_opts) do
     quote generated: true do
@@ -125,7 +125,7 @@ defmodule Associations do
       ## Options
 
         * `:async` - whether the searches of a single hop are run concurrently, each in its own
-          task. Defaults to `true`. Pass `false` where `c:Associations.fetch/3` has to run in the
+          task. Defaults to `true`. Pass `false` where `c:Associations.list/3` has to run in the
           process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the
           process that opened it and which a task therefore runs outside of.
       """

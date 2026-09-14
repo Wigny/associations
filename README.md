@@ -2,7 +2,7 @@
 
 Declarative associations between plain structs, loaded in batches.
 
-Structs that come from anywhere (an API client, an ETS table, a context function) have no associations of their own. `Associations` lets a module declare how they relate and how to fetch them, then reads those declarations in `load/2` and `load_many/2`.
+Structs that come from anywhere (an API client, an ETS table, a context function) have no associations of their own. `Associations` lets a module declare how they relate and how to list them, then reads those declarations in `load/2` and `load_many/2`.
 
 ```elixir
 defmodule Garage do
@@ -11,7 +11,7 @@ defmodule Garage do
   alias Garage.{Car, Customer}
 
   @impl true
-  def fetch(schema, fields, values) do
+  def list(schema, fields, values) do
     Store.list_by(schema, fields, values)
   end
 

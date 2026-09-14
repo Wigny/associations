@@ -27,7 +27,7 @@ defmodule Associations.Resolver do
 
   Each pair given holds the record a walk starts from and the steps of the association being
   loaded for it. The walks advance in lockstep: the steps at the same position all contribute
-  their searches, which are grouped by the schema and field they search and fetched one group at
+  their searches, which are grouped by the schema and field they search and listed one group at
   a time, before the records they found are walked through the next step. Walks may be of
   different lengths, so records of different schemas, and associations of different kinds, resolve
   in the same batches.
@@ -35,7 +35,7 @@ defmodule Associations.Resolver do
   Records found by the same walk are deduplicated at every hop, so a walk that converges on a
   record through more than one of the records before it holds that record once.
 
-  The groups of a single hop are fetched concurrently, each in its own task, unless `:async` is
+  The groups of a single hop are listed concurrently, each in its own task, unless `:async` is
   given as `false`.
 
   Returns the records each walk ended on, in the order the walks were given.
@@ -77,17 +77,17 @@ defmodule Associations.Resolver do
   end
 
   defp stream(batches, module, rows, opts) do
-    fetch = &fetch(module, &1, Map.fetch!(rows, &1))
+    list = &list(module, &1, Map.fetch!(rows, &1))
 
     if Keyword.get(opts, :async, true) do
-      Task.async_stream(batches, fetch, timeout: :infinity)
+      Task.async_stream(batches, list, timeout: :infinity)
     else
-      Enum.map(batches, &{:ok, fetch.(&1)})
+      Enum.map(batches, &{:ok, list.(&1)})
     end
   end
 
-  defp fetch(module, {target, fields}, rows) do
-    {:ok, module.fetch(target, fields, Enum.uniq(rows))}
+  defp list(module, {target, fields}, rows) do
+    {:ok, module.list(target, fields, Enum.uniq(rows))}
   catch
     kind, reason -> {kind, reason, __STACKTRACE__}
   end

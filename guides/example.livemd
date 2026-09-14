@@ -119,7 +119,7 @@ end
 
 ## The declarations
 
-`Blog` is the only module that knows how the three relate. Its `fetch/3` leaves the fields open, so the one clause answers every schema, and it logs every call it is asked for so that the requests each load makes are visible below.
+`Blog` is the only module that knows how the three relate. Its `list/3` leaves the fields open, so the one clause answers every schema, and it logs every call it is asked for so that the requests each load makes are visible below.
 
 ```elixir
 defmodule Blog do
@@ -128,8 +128,8 @@ defmodule Blog do
   require Logger
 
   @impl true
-  def fetch(schema, fields, values) do
-    Logger.info("fetch #{inspect(schema)} by #{inspect(fields)} for #{length(values)} rows")
+  def list(schema, fields, values) do
+    Logger.info("list #{inspect(schema)} by #{inspect(fields)} for #{length(values)} rows")
 
     Client.list(schema, fields, values)
   end
@@ -169,7 +169,7 @@ posts = Blog.load(user, :posts)
 
 ```
 
-13:49:18.141 [info] fetch Post by [:user_id] for 1 rows
+13:49:18.141 [info] list Post by [:user_id] for 1 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -251,7 +251,7 @@ Blog.load(post, :author)
 
 ```
 
-13:49:18.499 [info] fetch User by [:id] for 1 rows
+13:49:18.499 [info] list User by [:id] for 1 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -272,7 +272,7 @@ Blog.load_many([%User{id: 1}, %User{id: 2}, %User{id: 3}], :posts)
 
 ```
 
-13:49:18.522 [info] fetch Post by [:user_id] for 3 rows
+13:49:18.522 [info] list Post by [:user_id] for 3 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -483,7 +483,7 @@ Map.fetch!(Map.new(comments_per_post), post)
 
 ```
 
-13:49:18.549 [info] fetch Comment by [:post_id] for 10 rows
+13:49:18.549 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -535,9 +535,9 @@ Blog.load(user, [:posts, :comments])
 
 ```
 
-13:49:18.574 [info] fetch Post by [:user_id] for 1 rows
+13:49:18.574 [info] list Post by [:user_id] for 1 rows
 
-13:49:18.592 [info] fetch Comment by [:post_id] for 10 rows
+13:49:18.592 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -798,9 +798,9 @@ Blog.load_many(posts, [:comments, :post])
 
 ```
 
-13:49:18.617 [info] fetch Comment by [:post_id] for 10 rows
+13:49:18.617 [info] list Comment by [:post_id] for 10 rows
 
-13:49:18.636 [info] fetch Post by [:id] for 10 rows
+13:49:18.636 [info] list Post by [:id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -952,7 +952,7 @@ Blog.load_many(posts, [:comments, :post])
 
 ## Running the searches in turn
 
-The searches of a single hop run concurrently, each in its own task. Where `fetch/3` has to run in the process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the process that opened it, `async: false` makes the calls in turn instead.
+The searches of a single hop run concurrently, each in its own task. Where `list/3` has to run in the process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the process that opened it, `async: false` makes the calls in turn instead.
 
 ```elixir
 Blog.load_many(posts, :comments, async: false)
@@ -962,7 +962,7 @@ Blog.load_many(posts, :comments, async: false)
 
 ```
 
-13:49:18.662 [info] fetch Comment by [:post_id] for 10 rows
+13:49:18.662 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
