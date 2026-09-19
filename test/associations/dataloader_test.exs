@@ -288,7 +288,7 @@ defmodule Associations.DataloaderTest do
 
     test "lists in another process when async is true", %{loader: loader, test_pid: caller} do
       Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
-        refute self() == caller
+        send(caller, {:list, self()})
 
         []
       end)
@@ -296,6 +296,8 @@ defmodule Associations.DataloaderTest do
       loader
       |> Dataloader.load(:garage, :cars, %Garage.Customer{id: 1, name: "John"})
       |> Dataloader.run()
+
+      assert_received {:list, pid} when pid != caller
     end
 
     test "rejects an unknown option" do

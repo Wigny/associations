@@ -8,7 +8,6 @@ defmodule Garage do
   alias Garage.Customer
   alias Garage.Dealer
   alias Garage.Invoice
-  alias Garage.Mechanic
   alias Garage.Part
   alias Garage.Registration
   alias Garage.Service
@@ -27,24 +26,42 @@ defmodule Garage do
     has_many :compatibilities, Compatibility
   end
 
-  association Mechanic do
-    has_many :services, Service
+  association Customer do
+    has_many :cars, Car, foreign_key: :owner_id
+    has_many :invoices, Invoice
+  end
+
+  association Dealer do
+    has_many :cars, Car, foreign_key: :dealer_code, references: :code
+  end
+
+  association Registration do
+    belongs_to :car, Car
+  end
+
+  association Invoice do
+    belongs_to :customer, Customer
   end
 
   association Service do
     belongs_to :car, Car
-    belongs_to :mechanic, Mechanic
     has_many :usages, Usage
-  end
-
-  association Compatibility do
-    belongs_to :part, Part,
-      foreign_key: [:manufacturer_code, :part_number],
-      references: [:manufacturer_code, :part_number]
   end
 
   association Part do
     has_many :usages, Usage,
+      foreign_key: [:manufacturer_code, :part_number],
+      references: [:manufacturer_code, :part_number]
+
+    has_many :compatibilities, Compatibility,
+      foreign_key: [:manufacturer_code, :part_number],
+      references: [:manufacturer_code, :part_number]
+  end
+
+  association Compatibility do
+    belongs_to :car, Car
+
+    belongs_to :part, Part,
       foreign_key: [:manufacturer_code, :part_number],
       references: [:manufacturer_code, :part_number]
   end
@@ -55,17 +72,5 @@ defmodule Garage do
     belongs_to :part, Part,
       foreign_key: [:manufacturer_code, :part_number],
       references: [:manufacturer_code, :part_number]
-  end
-
-  association Customer do
-    has_many :cars, Car, foreign_key: :owner_id
-  end
-
-  association Customer do
-    has_many :invoices, Invoice
-  end
-
-  association Dealer do
-    has_many :cars, Car, foreign_key: :dealer_code, references: :code
   end
 end

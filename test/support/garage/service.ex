@@ -1,5 +1,5 @@
 defmodule Garage.Service do
   @moduledoc false
 
-  defstruct [:id, :cost, :car_id, :mechanic_id]
+  defstruct [:id, :cost, :car_id]
 end

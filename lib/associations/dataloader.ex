@@ -26,6 +26,8 @@ if Code.ensure_loaded?(Dataloader.Source) do
     Requires the `:dataloader` dependency. This module is not compiled without it.
     """
 
+    alias Associations.Resolver
+
     defstruct [:module, :opts, batches: %{}, results: %{}]
 
     @opaque t :: %__MODULE__{
@@ -55,141 +57,132 @@ if Code.ensure_loaded?(Dataloader.Source) do
       %__MODULE__{module: module, opts: opts}
     end
 
-    @doc false
-    def path!(path) when is_atom(path) or is_list(path), do: path
-    def path!({path, args}) when is_map(args) and map_size(args) == 0, do: path!(path)
-
-    def path!({path, args}) when is_map(args) do
-      raise ArgumentError,
-            "#{inspect(__MODULE__)} cannot apply the arguments #{inspect(args)} to the " <>
-              "#{inspect(path)} association"
-    end
-
-    def path!(batch_key) do
-      raise ArgumentError,
-            "expected an association path or a {path, args} pair as the batch key, got: " <>
-              inspect(batch_key)
-    end
-
-    @doc false
-    def loaded?(%__MODULE__{results: results}, batch_key, record) do
-      match?(%{^batch_key => %{^record => {:ok, _result}}}, results)
-    end
-
-    @doc false
-    def enqueue(%__MODULE__{batches: batches} = source, batch_key, record) do
-      batches = Map.update(batches, batch_key, MapSet.new([record]), &MapSet.put(&1, record))
-
-      %{source | batches: batches}
-    end
-
-    @doc false
-    def run_batches(%__MODULE__{batches: batches, opts: opts} = source) do
-      opts = [timeout: opts[:timeout], async?: opts[:async]]
-
-      Dataloader.async_safely(
-        Dataloader,
-        :run_tasks,
-        [batches, &load_batch(source, &1), opts],
-        opts
-      )
-    end
-
-    defp load_batch(%__MODULE__{module: module, opts: opts}, {batch_key, records}) do
-      path = path!(batch_key)
-
-      records
-      |> MapSet.to_list()
-      |> module.load_many(path, opts)
-      |> Map.new(&shape(module, path, &1))
-    end
-
-    defp shape(module, path, {%schema{} = record, records}) do
-      if one?(module, schema, path) do
-        {record, {:ok, one!(records, schema, path)}}
-      else
-        {record, {:ok, records}}
-      end
-    end
-
-    @doc false
-    def store(%__MODULE__{batches: batches} = source, {:exit, exception}) do
-      store(source, Map.new(batches, &{&1, {:error, exception}}))
-    end
-
-    def store(%__MODULE__{} = source, batch_results) do
-      Enum.reduce(batch_results, %{source | batches: %{}}, &store_batch(&2, &1))
-    end
-
-    defp store_batch(source, {{batch_key, _records}, {:ok, results}}) do
-      put_results(source, batch_key, results)
-    end
-
-    defp store_batch(source, {{batch_key, records}, {:error, reason}}) do
-      put_results(source, batch_key, Map.new(records, &{&1, {:error, reason}}))
-    end
-
-    @doc false
-    def put_results(%__MODULE__{results: results} = source, batch_key, batch) do
-      %{source | results: Map.update(results, batch_key, batch, &Map.merge(&1, batch))}
-    end
-
-    @doc false
-    def fetch_result(%__MODULE__{results: results}, batch_key, record) do
-      case results do
-        %{^batch_key => %{^record => result}} -> result
-        %{^batch_key => _batch} -> {:error, "Unable to find item #{inspect(record)} in batch"}
-        _results -> {:error, "Unable to find batch #{inspect(batch_key)}"}
-      end
-    end
-
-    defp one?(module, schema, path) do
-      Enum.all?(kinds(module, schema, path), &(&1 in [:belongs_to, :has_one]))
-    end
-
-    defp kinds(module, schema, path) do
-      {kinds, _schema} = Enum.map_reduce(List.wrap(path), schema, &hop(module, &2, &1))
-
-      kinds
-    end
-
-    defp hop(module, schema, name) do
-      {kind, %{target: target}} = Map.fetch!(module.__definitions__(), {schema, name})
-
-      {kind, target}
-    end
-
-    defp one!([], _schema, _path), do: nil
-    defp one!([record], _schema, _path), do: record
-
-    defp one!(records, schema, path) do
-      raise "the #{inspect(path)} association of #{inspect(schema)} found #{length(records)} records"
-    end
-
     defimpl Dataloader.Source do
-      def load(source, batch_key, record) do
-        @for.path!(batch_key)
+      def load(source, batch_key, item) do
+        batch_key = normalize_key(batch_key)
 
-        if @for.loaded?(source, batch_key, record) do
+        if fetched?(source.results, batch_key, item) do
           source
         else
-          @for.enqueue(source, batch_key, record)
+          update_in(source.batches, fn batches ->
+            Map.update(batches, batch_key, MapSet.new([item]), &MapSet.put(&1, item))
+          end)
         end
       end
 
-      def run(source), do: @for.store(source, @for.run_batches(source))
+      def put(source, batch_key, item, result) do
+        batch_key = normalize_key(batch_key)
 
-      def fetch(source, batch_key, record), do: @for.fetch_result(source, batch_key, record)
+        results =
+          Map.update(source.results, batch_key, {:ok, %{item => result}}, fn
+            {:ok, batch} -> {:ok, Map.put(batch, item, result)}
+            {:error, _reason} -> {:ok, %{item => result}}
+          end)
 
-      def put(source, batch_key, record, result) do
-        @for.put_results(source, batch_key, %{record => {:ok, result}})
+        %{source | results: results}
       end
 
-      def pending_batches?(source), do: map_size(source.batches) > 0
+      def fetch(source, batch_key, item) do
+        batch_key = normalize_key(batch_key)
+
+        case Map.fetch(source.results, batch_key) do
+          {:ok, batch} -> fetch_item(batch, item)
+          :error -> {:error, "Unable to find batch #{inspect(batch_key)}"}
+        end
+      end
+
+      def run(source) do
+        results =
+          Dataloader.async_safely(__MODULE__, :run_batches, [source],
+            async?: Dataloader.Source.async?(source)
+          )
+
+        results =
+          Map.merge(source.results, results, fn
+            _batch_key, {:ok, batch}, {:ok, new_batch} -> {:ok, Map.merge(batch, new_batch)}
+            _batch_key, _batch, new_batch -> new_batch
+          end)
+
+        %{source | batches: %{}, results: results}
+      end
+
+      def pending_batches?(source), do: source.batches != %{}
 
       def timeout(source), do: source.opts[:timeout]
 
       def async?(source), do: source.opts[:async]
+
+      def run_batches(source) do
+        batches = Enum.to_list(source.batches)
+        options = [timeout: source.opts[:timeout], on_timeout: :kill_task]
+
+        results =
+          batches
+          |> run_stream(&run_batch(source, &1), options, async?(source))
+          |> Enum.map(fn
+            {:ok, result} -> {:ok, result}
+            {:exit, reason} -> {:error, reason}
+          end)
+
+        batches
+        |> Enum.map(fn {batch_key, _items} -> batch_key end)
+        |> Enum.zip(results)
+        |> Map.new()
+      end
+
+      defp run_stream(batches, fun, options, true) do
+        Dataloader.async_stream(batches, fun, options)
+      end
+
+      defp run_stream(batches, fun, _options, _async?) do
+        Enum.map(batches, fn batch ->
+          try do
+            {:ok, fun.(batch)}
+          rescue
+            exception -> {:exit, exception}
+          end
+        end)
+      end
+
+      defp run_batch(%{module: module} = source, {path, items}) do
+        items
+        |> MapSet.to_list()
+        |> module.load_many(path, async: source.opts[:async])
+        |> Map.new(fn {item, records} -> {item, Resolver.shape(module, item, path, records)} end)
+      end
+
+      defp fetch_item({:error, _reason} = error, _item), do: error
+
+      defp fetch_item({:ok, batch}, item) do
+        case Map.fetch(batch, item) do
+          {:ok, result} -> {:ok, result}
+          :error -> {:error, "Unable to find item #{inspect(item)} in batch"}
+        end
+      end
+
+      defp fetched?(results, batch_key, item) do
+        match?(%{^batch_key => {:ok, %{^item => _result}}}, results)
+      end
+
+      defp normalize_key({path, args}) when args == %{} or args == [] do
+        normalize_key(path)
+      end
+
+      defp normalize_key({path, args}) when is_map(args) or is_list(args) do
+        raise ArgumentError,
+              "Associations.Dataloader cannot apply the arguments #{inspect(args)} " <>
+                "to the #{inspect(path)} association"
+      end
+
+      defp normalize_key(path) when is_atom(path) and not is_nil(path), do: path
+
+      defp normalize_key(path) when is_list(path), do: path
+
+      defp normalize_key(batch_key) do
+        raise ArgumentError,
+              "expected an association path or a {path, args} pair as the batch key, " <>
+                "got: #{inspect(batch_key)}"
+      end
     end
   end
 end

@@ -1,23 +1,24 @@
 defmodule Associations do
-  @moduledoc """
-  Declarative associations between plain structs.
+  @moduledoc ~S"""
+  Declarative associations between plain structs, loaded in batches.
 
-  A module that `use`s `Associations` implements the `c:list/3` callback, which knows how to
-  list records, and declares one `association/2` block per struct. The declarations are resolved
-  while the module compiles, and `load/2` and `load_many/2` read them to search through `c:list/3`.
+  The structs stay as they are, with no knowledge of one another. A single module declares how
+  they relate and how to list them:
 
       defmodule Garage do
         use Associations
 
-        alias Garage.{Car, Customer}
+        alias Garage.{Car, Customer, Dealer, Registration}
 
         @impl true
         def list(schema, fields, values) do
-          Store.list_by(schema, fields, values)
+          Garage.Store.list(schema, fields, values)
         end
 
         association Car do
           belongs_to :owner, Customer
+          belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
+          has_one :registration, Registration
         end
 
         association Customer do
@@ -25,18 +26,26 @@ defmodule Associations do
         end
       end
 
-      iex> Garage.load(%Garage.Customer{id: 1}, :cars)
-      [
-        %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
-        %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
-      ]
+  Declaring the associations outside the structs is what lets them be declared for structs you do
+  not own, such as the ones an API client or another library hands you, and lets two modules read
+  the same structs through association graphs of their own.
 
-      iex> Garage.load(%Garage.Car{owner_id: 1}, :owner)
+  ## Loading
+
+  `use Associations` defines `load/3` and `load_many/3` on the module, and documents them there.
+  `load/3` follows an association from a single record, answering with a record for a `belongs_to`
+  or a `has_one`, and with a list for a `has_many`:
+
+      iex> Garage.load(%Garage.Car{id: 1, owner_id: 1}, :owner)
       %Garage.Customer{id: 1, name: "John"}
 
-  A `belongs_to` and a `has_one` association return a single record, a `has_many` a list. `load/2`
-  walks one record and `load_many/2` walks many at once, and both take a path of associations as
-  well as a single one.
+      iex> Garage.load(%Garage.Customer{id: 2, name: "Jane"}, :cars)
+      [%Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}]
+
+  A list of names walks a path of associations, one hop at a time, keeping a record only once.
+
+  `load_many/3` follows the same path from many records at once, pairing each of them with what it
+  found.
   """
 
   alias Associations.Resolver
@@ -70,7 +79,7 @@ defmodule Associations do
       end
 
   The records are returned as a flat list, in any order between rows and in the order they are
-  wanted within one; `load/2` and `load_many/2` group them by `fields` themselves. A record
+  wanted within one; `load/3` and `load_many/3` group them by `fields` themselves. A record
   matching none of the rows asked for is ignored, so a source that can only answer more coarsely,
   by each field separately, may return more than it was asked for.
 
@@ -80,7 +89,7 @@ defmodule Associations do
 
   Those calls run concurrently, each in its own task, so this must be safe to run in parallel and
   the order the calls are made in is not defined. A task does not inherit what the process calling
-  `load/2` holds, which matters when the records come from a connection checked out to it: an
+  `load/3` holds, which matters when the records come from a connection checked out to it: an
   `Ecto.Repo` reads its sandbox connection through `$callers`, which a task does carry, but a
   transaction is bound to the process that opened it, and a call running beside it is outside it.
   Pass `async: false` to `load/3` or `load_many/3` there, and the calls are made in turn, in the
@@ -129,7 +138,7 @@ defmodule Associations do
           process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the
           process that opened it and which a task therefore runs outside of.
       """
-      @spec load(struct, atom | [atom], async: boolean) :: struct | [struct] | nil
+      @spec load(struct, atom | [atom, ...], async: boolean) :: struct | [struct] | nil
       def load(record, path, opts \\ []) do
         Associations.load(__MODULE__, record, path, opts)
       end
@@ -163,7 +172,7 @@ defmodule Associations do
 
       Takes the same options as `load/3`.
       """
-      @spec load_many([struct], atom | [atom], async: boolean) :: [{struct, [struct]}]
+      @spec load_many([struct], atom | [atom, ...], async: boolean) :: [{struct, [struct]}]
       def load_many(records, path, opts \\ []) do
         Associations.load_many(__MODULE__, records, path, opts)
       end
@@ -196,7 +205,7 @@ defmodule Associations do
   @doc """
   Declares that the enclosing schema holds the foreign key pointing to `schema`.
 
-  `load/2` reads the foreign key off the struct and searches `schema` by its primary key,
+  `load/3` reads the foreign key off the struct and searches `schema` by its primary key,
   returning a single record, or `nil` when none matches. It raises when more than one does.
 
       association Car do
@@ -222,16 +231,13 @@ defmodule Associations do
   """
   @spec belongs_to(atom, module, keyword) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
-    quote do
-      @declarations {@association_schema, :belongs_to, unquote(name), unquote(schema),
-                     unquote(opts)}
-    end
+    declare(:belongs_to, name, schema, opts)
   end
 
   @doc """
   Declares that `schema` holds the foreign key pointing to the enclosing schema.
 
-  `load/2` reads the primary key off the struct and searches `schema` by the foreign key,
+  `load/3` reads the primary key off the struct and searches `schema` by the foreign key,
   returning a list of records.
 
       association Customer do
@@ -259,10 +265,7 @@ defmodule Associations do
   """
   @spec has_many(atom, module, keyword) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
-    quote do
-      @declarations {@association_schema, :has_many, unquote(name), unquote(schema),
-                     unquote(opts)}
-    end
+    declare(:has_many, name, schema, opts)
   end
 
   @doc """
@@ -279,14 +282,14 @@ defmodule Associations do
   """
   @spec has_one(atom, module, keyword) :: Macro.t()
   defmacro has_one(name, schema, opts \\ []) do
-    quote do
-      @declarations {@association_schema, :has_one, unquote(name), unquote(schema), unquote(opts)}
-    end
+    declare(:has_one, name, schema, opts)
   end
 
   defmacro __before_compile__(env) do
-    declarations = Module.get_attribute(env.module, :declarations)
-    definitions = Map.new(declarations, &define/1)
+    definitions =
+      env.module
+      |> Module.get_attribute(:declarations)
+      |> Map.new(&define/1)
 
     quote do
       @doc false
@@ -295,20 +298,24 @@ defmodule Associations do
   end
 
   defp define({schema, :belongs_to, name, target, opts}) do
-    from = Keyword.get_lazy(opts, :foreign_key, fn -> :"#{name}_id" end)
-    to = Keyword.get(opts, :references, :id)
+    opts = Keyword.validate!(opts, foreign_key: :"#{name}_id", references: :id)
 
-    {{schema, name}, {:belongs_to, step!(schema, name, target, from, to)}}
+    define(schema, name, target, :one, opts[:foreign_key], opts[:references])
   end
 
-  defp define({schema, kind, name, target, opts}) when kind in [:has_many, :has_one] do
-    from = Keyword.get(opts, :references, :id)
-    to = Keyword.get_lazy(opts, :foreign_key, fn -> default_foreign_key(schema) end)
+  defp define({schema, :has_many, name, target, opts}) do
+    opts = Keyword.validate!(opts, foreign_key: default_foreign_key(schema), references: :id)
 
-    {{schema, name}, {kind, step!(schema, name, target, from, to)}}
+    define(schema, name, target, :many, opts[:references], opts[:foreign_key])
   end
 
-  defp step!(schema, name, target, from, to) do
+  defp define({schema, :has_one, name, target, opts}) do
+    opts = Keyword.validate!(opts, foreign_key: default_foreign_key(schema), references: :id)
+
+    define(schema, name, target, :one, opts[:references], opts[:foreign_key])
+  end
+
+  defp define(schema, name, target, cardinality, from, to) do
     from = List.wrap(from)
     to = List.wrap(to)
 
@@ -318,7 +325,7 @@ defmodule Associations do
               "with #{inspect(to)}, which name a different number of fields"
     end
 
-    Resolver.step(target, from, to)
+    {{schema, name}, %{target: target, cardinality: cardinality, from: from, to: to}}
   end
 
   defp default_foreign_key(schema) do
@@ -326,60 +333,21 @@ defmodule Associations do
   end
 
   @doc false
-  def load(module, %schema{} = record, path, opts) do
-    {kinds, steps} = walk!(module, schema, path)
-    [results] = Resolver.resolve(module, [{record, steps}], opts)
+  def load(module, record, path, opts) do
+    [{^record, records}] = Resolver.load_many(module, [record], path, opts)
 
-    if Enum.all?(kinds, &(&1 in [:belongs_to, :has_one])) do
-      one!(results, schema, path)
-    else
-      results
-    end
+    Resolver.shape(module, record, path, records)
   end
 
   @doc false
   def load_many(module, records, path, opts) when is_list(records) do
-    walks =
-      Enum.map(records, fn %schema{} = record ->
-        {_kinds, steps} = walk!(module, schema, path)
-
-        {record, steps}
-      end)
-
-    Enum.zip(records, Resolver.resolve(module, walks, opts))
+    Resolver.load_many(module, records, path, opts)
   end
 
-  defp walk!(_module, _schema, []) do
-    raise ArgumentError, "an association path must hold at least one association"
-  end
-
-  defp walk!(module, schema, path) when is_list(path) do
-    {hops, _schema} =
-      Enum.map_reduce(path, schema, fn name, schema ->
-        {_kind, %{target: target}} = hop = definition!(module, schema, name)
-
-        {hop, target}
-      end)
-
-    Enum.unzip(hops)
-  end
-
-  defp walk!(module, schema, name), do: walk!(module, schema, [name])
-
-  defp definition!(module, schema, name) do
-    case Map.fetch(module.__definitions__(), {schema, name}) do
-      {:ok, definition} ->
-        definition
-
-      :error ->
-        raise ArgumentError, "#{inspect(schema)} has no #{inspect(name)} association"
+  defp declare(kind, name, schema, opts) do
+    quote do
+      @declarations {@association_schema, unquote(kind), unquote(name), unquote(schema),
+                     unquote(opts)}
     end
-  end
-
-  defp one!([], _schema, _path), do: nil
-  defp one!([record], _schema, _path), do: record
-
-  defp one!(records, schema, path) do
-    raise "the #{inspect(path)} association of #{inspect(schema)} found #{length(records)} records"
   end
 end

@@ -157,8 +157,6 @@ defmodule AssociationsTest do
       owner_id = nil
       car = %Garage.Car{id: 1, owner_id: owner_id}
 
-      Mox.expect(MockStore, :list, fn Garage.Customer, [:id], [[^owner_id]] -> [] end)
-
       assert Garage.load(car, :owner) == nil
     end
 
