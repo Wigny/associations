@@ -4,7 +4,7 @@ if Code.ensure_loaded?(Dataloader.Source) do
     A `Dataloader.Source` that loads associations through a module that `use`s `Associations`.
 
     The batch key is an association name, and the item is the record it is loaded for. Every
-    record queued under the same name is loaded in one `load_many/3` call when the loader runs,
+    record queued under the same name is loaded in one `load/3` call when the loader runs,
     whatever its schema.
 
         loader =
@@ -23,7 +23,7 @@ if Code.ensure_loaded?(Dataloader.Source) do
     A `belongs_to` or a `has_one` answers with a single record, or `nil`, and a `has_many` with a
     list, the way `load/3` does.
 
-    The batch key may also be a `{name, args}` pair, and `args` are then passed to `load_many/3` as
+    The batch key may also be a `{name, args}` pair, and `args` are then passed to `load/3` as
     its `:args`, so each record is listed with them in a call of its own. A map is turned into a
     keyword list sorted by key, so the same args given as a map or as a keyword list share a batch.
 
@@ -31,8 +31,6 @@ if Code.ensure_loaded?(Dataloader.Source) do
 
     Requires the `:dataloader` dependency. This module is not compiled without it.
     """
-
-    alias Associations.Resolver
 
     defstruct [:module, :async, :timeout, batches: %{}, results: %{}]
 
@@ -52,7 +50,7 @@ if Code.ensure_loaded?(Dataloader.Source) do
     ## Options
 
       * `:async` - whether the batches of the source run concurrently, each in its own task, and
-        whether the searches inside a batch do, as `:async` of `load_many/3`. Defaults to `true`.
+        whether the searches inside a batch do, as `:async` of `load/3`. Defaults to `true`.
         Pass `false` where `c:Associations.list/4` has to run in the process calling
         `Dataloader.run/1`, such as inside an `Ecto.Repo` transaction.
 
@@ -146,12 +144,10 @@ if Code.ensure_loaded?(Dataloader.Source) do
       def async?(source), do: source.async
 
       defp load_batch(source, {{name, args}, items}) do
-        pairs =
-          source.module.load_many(MapSet.to_list(items), name, args: args, async: source.async)
+        items = MapSet.to_list(items)
+        results = source.module.load(items, name, args: args, async: source.async)
 
-        Map.new(pairs, fn {item, records} ->
-          {item, {:ok, Resolver.shape(source.module, item, name, records)}}
-        end)
+        Map.new(Enum.zip(items, results), fn {item, result} -> {item, {:ok, result}} end)
       end
 
       defp normalize_key({name, args})

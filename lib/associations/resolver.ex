@@ -17,16 +17,6 @@ defmodule Associations.Resolver do
            values :: [term]}
 
   @doc """
-  Walks `record` through the association `name`, shaped the way `shape/4` shapes it.
-  """
-  @spec load(module, struct, atom, async: boolean, args: keyword) :: struct | [struct] | nil
-  def load(module, record, name, opts) do
-    [{^record, records}] = load_many(module, [record], name, opts)
-
-    shape(module, record, name, records)
-  end
-
-  @doc """
   Walks every record through the association `name`, searching for all of them at once.
 
   Each record is walked through the steps `name` declares on its own schema, so records of
@@ -48,10 +38,19 @@ defmodule Associations.Resolver do
   The groups of a single hop are listed concurrently, each in its own task, unless `:async` is
   given as `false`.
 
-  Returns each record paired with the records its walk ended on, in the order they were given.
+  Returns the records each walk ended on, shaped the way `shape/4` shapes them, one result per
+  record in the order they were given. Given a single record rather than a list, returns its
+  result alone.
   """
-  @spec load_many(module, [struct], atom, async: boolean, args: keyword) :: [{struct, [struct]}]
-  def load_many(module, records, name, opts) when is_list(records) do
+  @spec load(module, struct, atom, async: boolean, args: keyword) :: struct | [struct] | nil
+  def load(module, record, name, opts) when is_struct(record) do
+    [result] = load(module, [record], name, opts)
+
+    result
+  end
+
+  @spec load(module, [struct], atom, async: boolean, args: keyword) :: [struct | [struct] | nil]
+  def load(module, records, name, opts) when is_list(records) do
     opts = Keyword.validate!(opts, args: [], async: true)
     definitions = module.__definitions__()
     args = Keyword.fetch!(opts, :args)
@@ -63,7 +62,9 @@ defmodule Associations.Resolver do
         {List.update_at(steps, -1, &%{&1 | args: args}), [record]}
       end)
 
-    Enum.zip(records, walk(walks, &list_all(module, &1, opts)))
+    found = walk(walks, &list_all(module, &1, opts))
+
+    Enum.zip_with(records, found, &shape(module, &1, name, &2))
   end
 
   @doc """

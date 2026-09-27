@@ -2,7 +2,7 @@
 
 Declarative associations between plain structs, loaded in batches.
 
-Structs that come from anywhere (an API client, an ETS table, a context function) have no associations of their own. `Associations` lets a module declare how they relate and how to list them, then reads those declarations in `load/2` and `load_many/2`.
+Structs that come from anywhere (an API client, an ETS table, a context function) have no associations of their own. `Associations` lets a module declare how they relate and how to list them, then reads those declarations in `load/3`.
 
 ```elixir
 defmodule Garage do
@@ -29,8 +29,8 @@ end
 Garage.load(car, :owner)
 #=> %Customer{id: 1}
 
-Garage.load_many([customer, dealer], :cars)
-#=> [{%Customer{id: 1}, [%Car{id: 1}, %Car{id: 2}]}, {%Dealer{code: "AAA"}, [%Car{id: 1}]}]
+Garage.load([customer, dealer], :cars)
+#=> [[%Car{id: 1}, %Car{id: 2}], [%Car{id: 1}]]
 ```
 
 See `Associations` for the full documentation.

@@ -32,7 +32,7 @@ defmodule Associations do
 
   ## Loading
 
-  `use Associations` defines `load/3` and `load_many/3` on the module, and documents them there.
+  `use Associations` defines `load/3` on the module, and documents it there.
   `load/3` follows an association from a single record, answering with a record for a `belongs_to`
   or a `has_one`, and with a list for a `has_many`:
 
@@ -45,8 +45,8 @@ defmodule Associations do
   A `has_many` or a `has_one` declared with `:through` walks other associations, one hop at a time,
   keeping a record only once.
 
-  `load_many/3` follows the same association from many records at once, pairing each of them with
-  what it found.
+  Given a list of records, `load/3` follows the same association from all of them at once,
+  answering with what each of them found, in the order they were given.
   """
 
   @doc """
@@ -78,11 +78,11 @@ defmodule Associations do
       end
 
   The records are returned as a flat list, in any order between rows and in the order they are
-  wanted within one; `load/3` and `load_many/3` group them by `fields` themselves. A record
+  wanted within one; `load/3` groups them by `fields` itself. A record
   matching none of the rows asked for is ignored, so a source that can only answer more coarsely,
   by each field separately, may return more than it was asked for.
 
-  `args` holds what the caller passed as `:args` to `load/3` or `load_many/3`, and is `[]`
+  `args` holds what the caller passed as `:args` to `load/3`, and is `[]`
   otherwise. They are applied to the whole result of the call: a call given args holds the rows of
   a single record, every row its association reached, even through other associations, so a limit,
   an order or a page applies to what that record ends on. The records are returned in the order
@@ -101,7 +101,7 @@ defmodule Associations do
   `load/3` holds, which matters when the records come from a connection checked out to it: an
   `Ecto.Repo` reads its sandbox connection through `$callers`, which a task does carry, but a
   transaction is bound to the process that opened it, and a call running beside it is outside it.
-  Pass `async: false` to `load/3` or `load_many/3` there, and the calls are made in turn, in the
+  Pass `async: false` to `load/3` there, and the calls are made in turn, in the
   process asking for them.
   """
   @callback list(schema :: module, fields :: [atom], values :: [[term]], args :: keyword) ::
@@ -135,6 +135,25 @@ defmodule Associations do
           iex> Garage.load(%Garage.Customer{id: 1}, :dealers)
           [%Garage.Dealer{code: "AAA", name: "Anne"}]
 
+      Given a list of records, loads the association of every one of them, searching for all of
+      them at once. This is what keeps loading an association over a list from querying once per
+      record. Returns one result per record, shaped as it would be for that record alone, in the
+      order they were given.
+
+      The records given may be of different schemas, as long as each of them declares the
+      association. Records looking for the same thing are searched for once.
+
+          iex> customer = %Garage.Customer{id: 1, name: "John"}
+          iex> dealer = %Garage.Dealer{code: "BBB", name: "Bill"}
+          iex> Garage.load([customer, dealer], :cars)
+          [
+            [
+              %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
+              %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
+            ],
+            [%Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}]
+          ]
+
       ## Options
 
         * `:async` - whether the searches of a single hop are run concurrently, each in its own
@@ -147,43 +166,10 @@ defmodule Associations do
           them. Defaults to `[]`. Given any, the association is listed once per record, not once
           for all of them, so that the args apply to each record's records as a whole.
       """
+      @spec load([struct], atom, async: boolean, args: keyword) :: [struct | [struct] | nil]
       @spec load(struct, atom, async: boolean, args: keyword) :: struct | [struct] | nil
       def load(record, name, opts \\ []) do
         Associations.Resolver.load(__MODULE__, record, name, opts)
-      end
-
-      @doc """
-      Loads the association `name` of every record, searching for all of them at once.
-
-      This is what keeps loading an association over a list from querying once per record. Returns
-      a `{record, records}` pair per record, in the order they were given, always with a list on
-      the right, whatever the kind of the association.
-
-      The records given may be of different schemas, as long as each of them declares the
-      association. Records looking for the same thing are searched for once.
-
-          iex> customer = %Garage.Customer{id: 1, name: "John"}
-          iex> dealer = %Garage.Dealer{code: "BBB", name: "Bill"}
-          iex> Garage.load_many([customer, dealer], :cars)
-          [
-            {
-              %Garage.Customer{id: 1, name: "John"},
-              [
-                %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
-                %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
-              ]
-            },
-            {
-              %Garage.Dealer{code: "BBB", name: "Bill"},
-              [%Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}]
-            }
-          ]
-
-      Takes the same options as `load/3`.
-      """
-      @spec load_many([struct], atom, async: boolean, args: keyword) :: [{struct, [struct]}]
-      def load_many(records, name, opts \\ []) do
-        Associations.Resolver.load_many(__MODULE__, records, name, opts)
       end
     end
   end

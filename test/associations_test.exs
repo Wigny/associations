@@ -314,7 +314,7 @@ defmodule AssociationsTest do
     end
   end
 
-  describe "load_many/2" do
+  describe "load/2 over a list" do
     test "loads a belongs_to association" do
       owner_id1 = 1
       owner_id2 = 2
@@ -329,10 +329,7 @@ defmodule AssociationsTest do
         [customer1, customer2]
       end)
 
-      assert Garage.load_many([car1, car2], :owner) == [
-               {car1, [customer1]},
-               {car2, [customer2]}
-             ]
+      assert Garage.load([car1, car2], :owner) == [customer1, customer2]
     end
 
     test "loads a has_one association" do
@@ -352,10 +349,7 @@ defmodule AssociationsTest do
         [registration1, registration2]
       end)
 
-      assert Garage.load_many([car1, car2], :registration) == [
-               {car1, [registration1]},
-               {car2, [registration2]}
-             ]
+      assert Garage.load([car1, car2], :registration) == [registration1, registration2]
     end
 
     test "loads a has_many association" do
@@ -373,10 +367,7 @@ defmodule AssociationsTest do
         [car1, car2, car3]
       end)
 
-      assert Garage.load_many([customer1, customer2], :cars) == [
-               {customer1, [car1, car2]},
-               {customer2, [car3]}
-             ]
+      assert Garage.load([customer1, customer2], :cars) == [[car1, car2], [car3]]
     end
 
     test "lists every value a field is searched by in a single call" do
@@ -394,7 +385,7 @@ defmodule AssociationsTest do
         []
       end)
 
-      assert Garage.load_many([customer1, customer2], :cars) == [{customer1, []}, {customer2, []}]
+      assert Garage.load([customer1, customer2], :cars) == [[], []]
     end
 
     test "lists the groups of a hop in a process of their own", %{test_pid: caller} do
@@ -407,7 +398,7 @@ defmodule AssociationsTest do
         []
       end)
 
-      Garage.load_many([customer, dealer], :cars)
+      Garage.load([customer, dealer], :cars)
 
       assert_received {:listed, pid1} when pid1 != caller
       assert_received {:listed, pid2} when pid2 != caller
@@ -435,10 +426,7 @@ defmodule AssociationsTest do
         Garage.Dealer, [:code], [[^dealer_code1], [^dealer_code2]], [] -> [dealer1, dealer2]
       end)
 
-      assert Garage.load_many([customer1, customer2], :dealers) == [
-               {customer1, [dealer1]},
-               {customer2, [dealer2]}
-             ]
+      assert Garage.load([customer1, customer2], :dealers) == [[dealer1], [dealer2]]
     end
 
     test "lists each record in a call of its own when given args" do
@@ -458,10 +446,7 @@ defmodule AssociationsTest do
         |> Enum.take(limit)
       end)
 
-      assert Garage.load_many([customer1, customer2], :cars, args: [limit: 1]) == [
-               {customer1, [car1]},
-               {customer2, [car3]}
-             ]
+      assert Garage.load([customer1, customer2], :cars, args: [limit: 1]) == [[car1], [car3]]
     end
 
     test "keeps the order of the records it is given" do
@@ -476,14 +461,11 @@ defmodule AssociationsTest do
 
       Mox.expect(MockStore, :list, fn Garage.Car, [:owner_id], _values, [] -> [car1, car2] end)
 
-      assert Garage.load_many([customer2, customer1], :cars) == [
-               {customer2, [car2]},
-               {customer1, [car1]}
-             ]
+      assert Garage.load([customer2, customer1], :cars) == [[car2], [car1]]
     end
 
     test "returns an empty list for no records" do
-      assert Garage.load_many([], :cars) == []
+      assert Garage.load([], :cars) == []
     end
 
     test "searches once for records that look for the same thing" do
@@ -501,7 +483,7 @@ defmodule AssociationsTest do
         [customer]
       end)
 
-      assert Garage.load_many([car1, car2], :owner) == [{car1, [customer]}, {car2, [customer]}]
+      assert Garage.load([car1, car2], :owner) == [customer, customer]
     end
 
     test "lists records ending on the same rows in one call when given args" do
@@ -515,10 +497,7 @@ defmodule AssociationsTest do
         [customer]
       end)
 
-      assert Garage.load_many([car1, car2], :owner, args: [limit: 1]) == [
-               {car1, [customer]},
-               {car2, [customer]}
-             ]
+      assert Garage.load([car1, car2], :owner, args: [limit: 1]) == [customer, customer]
     end
 
     test "lists records ending on the same rows in a different order in one call when given args" do
@@ -543,10 +522,7 @@ defmodule AssociationsTest do
           [anne]
       end)
 
-      assert Garage.load_many([customer1, customer2], :dealers, args: [limit: 1]) == [
-               {customer1, [anne]},
-               {customer2, [anne]}
-             ]
+      assert Garage.load([customer1, customer2], :dealers, args: [limit: 1]) == [[anne], [anne]]
     end
 
     test "loads the association of records of different schemas" do
@@ -564,7 +540,7 @@ defmodule AssociationsTest do
         Garage.Car, [:dealer_code], [[^dealer_code]], [] -> [car2]
       end)
 
-      assert Garage.load_many([customer, dealer], :cars) == [{customer, [car1]}, {dealer, [car2]}]
+      assert Garage.load([customer, dealer], :cars) == [[car1], [car2]]
     end
 
     test "loads an association through other associations over records of different schemas" do
@@ -593,10 +569,7 @@ defmodule AssociationsTest do
           [registration1, registration2]
       end)
 
-      assert Garage.load_many([customer, dealer], :registrations) == [
-               {customer, [registration1]},
-               {dealer, [registration2]}
-             ]
+      assert Garage.load([customer, dealer], :registrations) == [[registration1], [registration2]]
     end
   end
 
