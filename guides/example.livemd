@@ -136,6 +136,7 @@ defmodule Blog do
 
   association User do
     has_many :posts, Post
+    has_many :comments, through: [:posts, :comments]
   end
 
   association Post do
@@ -152,7 +153,7 @@ end
 <!-- livebook:{"output":true} -->
 
 ```
-{:module, Blog, <<70, 79, 82, 49, 0, 0, 25, ...>>, ...}
+{:module, Blog, <<70, 79, 82, 49, 0, 0, 31, ...>>, ...}
 ```
 
 ## Loading one record
@@ -169,7 +170,7 @@ posts = Blog.load(user, :posts)
 
 ```
 
-13:49:18.141 [info] list Post by [:user_id] for 1 rows
+17:22:53.973 [info] list Post by [:user_id] for 1 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -251,7 +252,7 @@ Blog.load(post, :author)
 
 ```
 
-13:49:18.499 [info] list User by [:id] for 1 rows
+17:22:58.246 [info] list User by [:id] for 1 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -272,7 +273,7 @@ Blog.load_many([%User{id: 1}, %User{id: 2}, %User{id: 3}], :posts)
 
 ```
 
-13:49:18.522 [info] list Post by [:user_id] for 3 rows
+17:23:02.373 [info] list Post by [:user_id] for 3 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -483,7 +484,7 @@ Map.fetch!(Map.new(comments_per_post), post)
 
 ```
 
-13:49:18.549 [info] list Comment by [:post_id] for 10 rows
+17:23:07.028 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -523,21 +524,21 @@ Map.fetch!(Map.new(comments_per_post), post)
 ]
 ```
 
-## Association paths
+## Through other associations
 
-A path walks one association of the records the one before it found, the way `get_in/2` walks a nested map. Every hop is searched for in its own batch, no matter how many records reached it, so the two logged lines are the whole cost of reading every comment on every post a user wrote.
+`User` declares `:comments` through `[:posts, :comments]`, which walks one association of the records the one before it found, the way `get_in/2` walks a nested map. Every hop is searched for in its own batch, no matter how many records reached it, so the two logged lines are the whole cost of reading every comment on every post a user wrote. The posts found in between are not returned, and neither are repeats.
 
 ```elixir
-Blog.load(user, [:posts, :comments])
+Blog.load(user, :comments)
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
 
-13:49:18.574 [info] list Post by [:user_id] for 1 rows
+17:23:10.744 [info] list Post by [:user_id] for 1 rows
 
-13:49:18.592 [info] list Comment by [:post_id] for 10 rows
+17:23:10.765 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->
@@ -788,168 +789,6 @@ Blog.load(user, [:posts, :comments])
 ]
 ```
 
-The records the hops in between found are not returned, and neither are repeats, so a path says which records it ended on rather than which of the records before them led there. Walking from a post to its comments and back lands on the post it started from.
-
-```elixir
-Blog.load_many(posts, [:comments, :post])
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-
-13:49:18.617 [info] list Comment by [:post_id] for 10 rows
-
-13:49:18.636 [info] list Post by [:id] for 10 rows
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-[
-  {%Post{
-     id: 1,
-     user_id: 1,
-     title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-     body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-   },
-   [
-     %Post{
-       id: 1,
-       user_id: 1,
-       title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-       body: "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-     }
-   ]},
-  {%Post{
-     id: 2,
-     user_id: 1,
-     title: "qui est esse",
-     body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-   },
-   [
-     %Post{
-       id: 2,
-       user_id: 1,
-       title: "qui est esse",
-       body: "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-     }
-   ]},
-  {%Post{
-     id: 3,
-     user_id: 1,
-     title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
-     body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
-   },
-   [
-     %Post{
-       id: 3,
-       user_id: 1,
-       title: "ea molestias quasi exercitationem repellat qui ipsa sit aut",
-       body: "et iusto sed quo iure\nvoluptatem occaecati omnis eligendi aut ad\nvoluptatem doloribus vel accusantium quis pariatur\nmolestiae porro eius odio et labore et velit aut"
-     }
-   ]},
-  {%Post{
-     id: 4,
-     user_id: 1,
-     title: "eum et est occaecati",
-     body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
-   },
-   [
-     %Post{
-       id: 4,
-       user_id: 1,
-       title: "eum et est occaecati",
-       body: "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
-     }
-   ]},
-  {%Post{
-     id: 5,
-     user_id: 1,
-     title: "nesciunt quas odio",
-     body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
-   },
-   [
-     %Post{
-       id: 5,
-       user_id: 1,
-       title: "nesciunt quas odio",
-       body: "repudiandae veniam quaerat sunt sed\nalias aut fugiat sit autem sed est\nvoluptatem omnis possimus esse voluptatibus quis\nest aut tenetur dolor neque"
-     }
-   ]},
-  {%Post{
-     id: 6,
-     user_id: 1,
-     title: "dolorem eum magni eos aperiam quia",
-     body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
-   },
-   [
-     %Post{
-       id: 6,
-       user_id: 1,
-       title: "dolorem eum magni eos aperiam quia",
-       body: "ut aspernatur corporis harum nihil quis provident sequi\nmollitia nobis aliquid molestiae\nperspiciatis et ea nemo ab reprehenderit accusantium quas\nvoluptate dolores velit et doloremque molestiae"
-     }
-   ]},
-  {%Post{
-     id: 7,
-     user_id: 1,
-     title: "magnam facilis autem",
-     body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
-   },
-   [
-     %Post{
-       id: 7,
-       user_id: 1,
-       title: "magnam facilis autem",
-       body: "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
-     }
-   ]},
-  {%Post{
-     id: 8,
-     user_id: 1,
-     title: "dolorem dolore est ipsam",
-     body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
-   },
-   [
-     %Post{
-       id: 8,
-       user_id: 1,
-       title: "dolorem dolore est ipsam",
-       body: "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
-     }
-   ]},
-  {%Post{
-     id: 9,
-     user_id: 1,
-     title: "nesciunt iure omnis dolorem tempora et accusantium",
-     body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
-   },
-   [
-     %Post{
-       id: 9,
-       user_id: 1,
-       title: "nesciunt iure omnis dolorem tempora et accusantium",
-       body: "consectetur animi nesciunt iure dolore\nenim quia ad\nveniam autem ut quam aut nobis\net est aut quod aut provident voluptas autem voluptas"
-     }
-   ]},
-  {%Post{
-     id: 10,
-     user_id: 1,
-     title: "optio molestias id quia eum",
-     body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
-   },
-   [
-     %Post{
-       id: 10,
-       user_id: 1,
-       title: "optio molestias id quia eum",
-       body: "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
-     }
-   ]}
-]
-```
-
 ## Running the searches in turn
 
 The searches of a single hop run concurrently, each in its own task. Where `list/3` has to run in the process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the process that opened it, `async: false` makes the calls in turn instead.
@@ -962,7 +801,7 @@ Blog.load_many(posts, :comments, async: false)
 
 ```
 
-13:49:18.662 [info] list Comment by [:post_id] for 10 rows
+17:23:14.569 [info] list Comment by [:post_id] for 10 rows
 ```
 
 <!-- livebook:{"output":true} -->

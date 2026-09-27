@@ -193,126 +193,12 @@ defmodule AssociationsTest do
     end
 
     test "raises for an association the schema does not declare" do
-      assert_raise ArgumentError, "Garage.Customer has no :dealers association", fn ->
-        Garage.load(%Garage.Customer{id: 1}, :dealers)
+      assert_raise ArgumentError, "Garage.Customer has no :parts association", fn ->
+        Garage.load(%Garage.Customer{id: 1}, :parts)
       end
     end
 
-    test "loads a path of associations" do
-      owner_id = 1
-      car1_id = 1
-      car2_id = 2
-
-      customer = %Garage.Customer{id: owner_id}
-
-      car1 = %Garage.Car{id: car1_id, owner_id: owner_id}
-      car2 = %Garage.Car{id: car2_id, owner_id: owner_id}
-
-      service1 = %Garage.Service{id: 1, cost: 100, car_id: car1_id}
-      service2 = %Garage.Service{id: 2, cost: 200, car_id: car2_id}
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Car, [:owner_id], [[^owner_id]] -> [car1, car2]
-        Garage.Service, [:car_id], [[^car1_id], [^car2_id]] -> [service1, service2]
-      end)
-
-      assert Garage.load(customer, [:cars, :services]) == [service1, service2]
-    end
-
-    test "loads a path whose hops key on fields other than :id" do
-      owner_id = 1
-      dealer_code = "AAA"
-
-      customer = %Garage.Customer{id: owner_id}
-      dealer = %Garage.Dealer{code: dealer_code, name: "Anne"}
-      car = %Garage.Car{id: 1, owner_id: owner_id, dealer_code: dealer_code}
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Car, [:owner_id], [[^owner_id]] -> [car]
-        Garage.Dealer, [:code], [[^dealer_code]] -> [dealer]
-      end)
-
-      assert Garage.load(customer, [:cars, :dealer]) == [dealer]
-    end
-
-    test "loads a path whose hops key on more than one field" do
-      car_id = 1
-      manufacturer_code = "BOSCH"
-      part_number = "0242"
-
-      car = %Garage.Car{id: car_id}
-
-      part = %Garage.Part{
-        manufacturer_code: manufacturer_code,
-        part_number: part_number,
-        name: "Spark plug"
-      }
-
-      compatibility = %Garage.Compatibility{
-        car_id: car_id,
-        manufacturer_code: manufacturer_code,
-        part_number: part_number
-      }
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Compatibility, [:car_id], [[^car_id]] ->
-          [compatibility]
-
-        Garage.Part, [:manufacturer_code, :part_number], [[^manufacturer_code, ^part_number]] ->
-          [part]
-      end)
-
-      assert Garage.load(car, [:compatibilities, :part]) == [part]
-    end
-
-    test "returns a single record for a path of belongs_to associations" do
-      car_id = 1
-      owner_id = 2
-
-      service = %Garage.Service{id: 1, cost: 100, car_id: car_id}
-      car = %Garage.Car{id: car_id, owner_id: owner_id}
-      customer = %Garage.Customer{id: owner_id, name: "John"}
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Car, [:id], [[^car_id]] -> [car]
-        Garage.Customer, [:id], [[^owner_id]] -> [customer]
-      end)
-
-      assert Garage.load(service, [:car, :owner]) == customer
-    end
-
-    test "returns a single record for a path of belongs_to and has_one associations" do
-      car_id = 1
-
-      service = %Garage.Service{id: 1, cost: 100, car_id: car_id}
-      car = %Garage.Car{id: car_id}
-      registration = %Garage.Registration{plate: "ABC123", car_id: car_id}
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Car, [:id], [[^car_id]] -> [car]
-        Garage.Registration, [:car_id], [[^car_id]] -> [registration]
-      end)
-
-      assert Garage.load(service, [:car, :registration]) == registration
-    end
-
-    test "returns a list for a path holding a has_one after a has_many" do
-      owner_id = 1
-      car_id = 2
-
-      customer = %Garage.Customer{id: owner_id}
-      car = %Garage.Car{id: car_id, owner_id: owner_id}
-      registration = %Garage.Registration{plate: "ABC123", car_id: car_id}
-
-      Mox.expect(MockStore, :list, 2, fn
-        Garage.Car, [:owner_id], [[^owner_id]] -> [car]
-        Garage.Registration, [:car_id], [[^car_id]] -> [registration]
-      end)
-
-      assert Garage.load(customer, [:cars, :registration]) == [registration]
-    end
-
-    test "dedups the records a path converges on" do
+    test "loads a has_many association through other associations without repeats" do
       owner_id = 1
       dealer_code = "AAA"
 
@@ -327,39 +213,23 @@ defmodule AssociationsTest do
         Garage.Dealer, [:code], [[^dealer_code]] -> [dealer]
       end)
 
-      assert Garage.load(customer, [:cars, :dealer]) == [dealer]
+      assert Garage.load(customer, :dealers) == [dealer]
     end
 
-    test "raises for an association a schema along the path does not declare" do
-      assert_raise ArgumentError, "Garage.Car has no :usages association", fn ->
-        Garage.load(%Garage.Customer{id: 1}, [:cars, :usages])
-      end
-    end
-
-    test "raises for an empty path" do
-      assert_raise ArgumentError, "an association path must hold at least one association", fn ->
-        Garage.load(%Garage.Customer{id: 1}, [])
-      end
-    end
-
-    test "raises when a path of belongs_to associations finds more than one record" do
+    test "loads a has_one association through other associations as a single record" do
       car_id = 1
       owner_id = 2
 
       service = %Garage.Service{id: 1, cost: 100, car_id: car_id}
       car = %Garage.Car{id: car_id, owner_id: owner_id}
-
-      customer1 = %Garage.Customer{id: owner_id, name: "John"}
-      customer2 = %Garage.Customer{id: owner_id, name: "Jane"}
+      customer = %Garage.Customer{id: owner_id, name: "John"}
 
       Mox.expect(MockStore, :list, 2, fn
         Garage.Car, [:id], [[^car_id]] -> [car]
-        Garage.Customer, [:id], [[^owner_id]] -> [customer1, customer2]
+        Garage.Customer, [:id], [[^owner_id]] -> [customer]
       end)
 
-      assert_raise RuntimeError,
-                   "the [:car, :owner] association of Garage.Service found 2 records",
-                   fn -> Garage.load(service, [:car, :owner]) end
+      assert Garage.load(service, :owner) == customer
     end
   end
 
@@ -461,7 +331,7 @@ defmodule AssociationsTest do
       assert pid1 != pid2
     end
 
-    test "loads a path" do
+    test "loads an association through other associations" do
       owner_id1 = 1
       owner_id2 = 2
       dealer_code1 = "AAA"
@@ -481,7 +351,7 @@ defmodule AssociationsTest do
         Garage.Dealer, [:code], [[^dealer_code1], [^dealer_code2]] -> [dealer1, dealer2]
       end)
 
-      assert Garage.load_many([customer1, customer2], [:cars, :dealer]) == [
+      assert Garage.load_many([customer1, customer2], :dealers) == [
                {customer1, [dealer1]},
                {customer2, [dealer2]}
              ]
@@ -545,7 +415,7 @@ defmodule AssociationsTest do
       assert Garage.load_many([customer, dealer], :cars) == [{customer, [car1]}, {dealer, [car2]}]
     end
 
-    test "loads a path over records of different schemas" do
+    test "loads an association through other associations over records of different schemas" do
       owner_id = 1
       dealer_code = "AAA"
       car1_id = 1
@@ -571,7 +441,7 @@ defmodule AssociationsTest do
           [registration1, registration2]
       end)
 
-      assert Garage.load_many([customer, dealer], [:cars, :registration]) == [
+      assert Garage.load_many([customer, dealer], :registrations) == [
                {customer, [registration1]},
                {dealer, [registration2]}
              ]
@@ -636,6 +506,66 @@ defmodule AssociationsTest do
                        belongs_to :part, Garage.Part,
                          foreign_key: [:manufacturer_code, :part_number],
                          references: :code
+                     end
+                   end
+                 end
+  end
+
+  test "raises for an association going through one the schema along it does not declare" do
+    assert_raise ArgumentError,
+                 "the :usages association of Garage.Customer goes through :usages, which " <>
+                   "Garage.Car does not declare as a belongs_to, has_many or has_one",
+                 fn ->
+                   defmodule Warehouse do
+                     use Associations
+
+                     @impl true
+                     def list(_schema, _fields, _values), do: []
+
+                     association Garage.Customer do
+                       has_many :cars, Garage.Car, foreign_key: :owner_id
+                       has_many :usages, through: [:cars, :usages]
+                     end
+                   end
+                 end
+  end
+
+  test "raises for a has_one association going through one holding many records" do
+    assert_raise ArgumentError,
+                 "the :registration association of Garage.Customer is a has_one, so it cannot " <>
+                   "go through :cars of Garage.Customer, which holds many records",
+                 fn ->
+                   defmodule Warehouse do
+                     use Associations
+
+                     @impl true
+                     def list(_schema, _fields, _values), do: []
+
+                     association Garage.Car do
+                       has_one :registration, Garage.Registration
+                     end
+
+                     association Garage.Customer do
+                       has_many :cars, Garage.Car, foreign_key: :owner_id
+                       has_one :registration, through: [:cars, :registration]
+                     end
+                   end
+                 end
+  end
+
+  test "raises for an association going through an empty list" do
+    assert_raise ArgumentError,
+                 "the :dealers association of Garage.Customer must go through a non-empty " <>
+                   "list of associations, got: []",
+                 fn ->
+                   defmodule Warehouse do
+                     use Associations
+
+                     @impl true
+                     def list(_schema, _fields, _values), do: []
+
+                     association Garage.Customer do
+                       has_many :dealers, through: []
                      end
                    end
                  end

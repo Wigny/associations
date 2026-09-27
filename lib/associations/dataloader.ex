@@ -3,9 +3,9 @@ if Code.ensure_loaded?(Dataloader.Source) do
     @moduledoc """
     A `Dataloader.Source` that loads associations through a module that `use`s `Associations`.
 
-    The batch key is an association path, one name or a list of them, and the item is the record
-    it is loaded for. Every record queued under the same path is loaded in one `load_many/3`
-    call when the loader runs, whatever its schema.
+    The batch key is an association name, and the item is the record it is loaded for. Every
+    record queued under the same name is loaded in one `load_many/3` call when the loader runs,
+    whatever its schema.
 
         loader =
           Dataloader.new()
@@ -20,8 +20,8 @@ if Code.ensure_loaded?(Dataloader.Source) do
         iex> Dataloader.get(loader, :garage, :owner, car)
         %Garage.Customer{id: 1}
 
-    A path made only of `belongs_to` and `has_one` associations answers with a single record, or
-    `nil`, the way `load/3` does. Any `has_many` along it makes the answer a list.
+    A `belongs_to` or a `has_one` answers with a single record, or `nil`, and a `has_many` with a
+    list, the way `load/3` does.
 
     Requires the `:dataloader` dependency. This module is not compiled without it.
     """
@@ -144,11 +144,11 @@ if Code.ensure_loaded?(Dataloader.Source) do
         end)
       end
 
-      defp run_batch(%{module: module} = source, {path, items}) do
+      defp run_batch(%{module: module} = source, {name, items}) do
         items
         |> MapSet.to_list()
-        |> module.load_many(path, async: source.opts[:async])
-        |> Map.new(fn {item, records} -> {item, Resolver.shape(module, item, path, records)} end)
+        |> module.load_many(name, async: source.opts[:async])
+        |> Map.new(fn {item, records} -> {item, Resolver.shape(module, item, name, records)} end)
       end
 
       defp fetch_item({:error, _reason} = error, _item), do: error
@@ -164,23 +164,21 @@ if Code.ensure_loaded?(Dataloader.Source) do
         match?(%{^batch_key => {:ok, %{^item => _result}}}, results)
       end
 
-      defp normalize_key({path, args}) when args == %{} or args == [] do
-        normalize_key(path)
+      defp normalize_key({name, args}) when args == %{} or args == [] do
+        normalize_key(name)
       end
 
-      defp normalize_key({path, args}) when is_map(args) or is_list(args) do
+      defp normalize_key({name, args}) when is_map(args) or is_list(args) do
         raise ArgumentError,
               "Associations.Dataloader cannot apply the arguments #{inspect(args)} " <>
-                "to the #{inspect(path)} association"
+                "to the #{inspect(name)} association"
       end
 
-      defp normalize_key(path) when is_atom(path) and not is_nil(path), do: path
-
-      defp normalize_key(path) when is_list(path), do: path
+      defp normalize_key(name) when is_atom(name) and not is_nil(name), do: name
 
       defp normalize_key(batch_key) do
         raise ArgumentError,
-              "expected an association path or a {path, args} pair as the batch key, " <>
+              "expected an association name or a {name, args} pair as the batch key, " <>
                 "got: #{inspect(batch_key)}"
       end
     end

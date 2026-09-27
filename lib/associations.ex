@@ -42,13 +42,12 @@ defmodule Associations do
       iex> Garage.load(%Garage.Customer{id: 2, name: "Jane"}, :cars)
       [%Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}]
 
-  A list of names walks a path of associations, one hop at a time, keeping a record only once.
+  A `has_many` or a `has_one` declared with `:through` walks other associations, one hop at a time,
+  keeping a record only once.
 
-  `load_many/3` follows the same path from many records at once, pairing each of them with what it
-  found.
+  `load_many/3` follows the same association from many records at once, pairing each of them with
+  what it found.
   """
-
-  alias Associations.Resolver
 
   @doc """
   Lists the records of `schema` whose `fields` hold one of `values`.
@@ -117,18 +116,12 @@ defmodule Associations do
       @before_compile Associations
 
       @doc """
-      Loads the association `path` of `record`, either one name or a list of them.
+      Loads the association `name` of `record`.
 
-      Returns a single record, or `nil`, when every association along `path` is a `belongs_to` or
-      a `has_one`; one `has_many` anywhere in it makes the result a list.
+      Returns a single record, or `nil`, for a `belongs_to` or a `has_one`, and a list for a
+      `has_many`, including one declared through other associations.
 
-      A path walks one association of the records the one before it found, the way `get_in/2`
-      walks a nested map. Every hop is searched for in its own batch, no matter how many records
-      reached it, and the records the last hop found are returned without repeats. The records the
-      hops in between found are not returned, so a path tells you which records it ended on, not
-      which of the records before them led there.
-
-          iex> Garage.load(%Garage.Customer{id: 1}, [:cars, :dealer])
+          iex> Garage.load(%Garage.Customer{id: 1}, :dealers)
           [%Garage.Dealer{code: "AAA", name: "Anne"}]
 
       ## Options
@@ -138,17 +131,17 @@ defmodule Associations do
           process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the
           process that opened it and which a task therefore runs outside of.
       """
-      @spec load(struct, atom | [atom, ...], async: boolean) :: struct | [struct] | nil
-      def load(record, path, opts \\ []) do
-        Associations.load(__MODULE__, record, path, opts)
+      @spec load(struct, atom, async: boolean) :: struct | [struct] | nil
+      def load(record, name, opts \\ []) do
+        Associations.Resolver.load(__MODULE__, record, name, opts)
       end
 
       @doc """
-      Loads the association `path` of every record, searching for all of them at once.
+      Loads the association `name` of every record, searching for all of them at once.
 
       This is what keeps loading an association over a list from querying once per record. Returns
       a `{record, records}` pair per record, in the order they were given, always with a list on
-      the right, whatever the kind of the associations along `path`.
+      the right, whatever the kind of the association.
 
       The records given may be of different schemas, as long as each of them declares the
       association. Records looking for the same thing are searched for once.
@@ -172,9 +165,9 @@ defmodule Associations do
 
       Takes the same options as `load/3`.
       """
-      @spec load_many([struct], atom | [atom, ...], async: boolean) :: [{struct, [struct]}]
-      def load_many(records, path, opts \\ []) do
-        Associations.load_many(__MODULE__, records, path, opts)
+      @spec load_many([struct], atom, async: boolean) :: [{struct, [struct]}]
+      def load_many(records, name, opts \\ []) do
+        Associations.Resolver.load_many(__MODULE__, records, name, opts)
       end
     end
   end
@@ -262,6 +255,24 @@ defmodule Associations do
           foreign_key: [:manufacturer_code, :part_number],
           references: [:manufacturer_code, :part_number]
       end
+
+  ## Through other associations
+
+  Given `:through` in place of `schema`, the association walks a list of associations already
+  declared, one hop at a time, the way `get_in/2` walks a nested map. Each name is looked up on
+  the schema the one before it searched, starting from the enclosing schema, and a name that is
+  not declared there fails to compile.
+
+      association Customer do
+        has_many :cars, Car, foreign_key: :owner_id
+        has_many :dealers, through: [:cars, :dealer]
+      end
+
+  Every hop is searched for in its own batch, no matter how many records reached it, and the
+  records the last hop found are returned without repeats. The records the hops in between found
+  are not returned. The associations gone through must be a `belongs_to`, a `has_many` or a
+  `has_one`, not another association declared with `:through`, and `:foreign_key` and
+  `:references` do not apply.
   """
   @spec has_many(atom, module, keyword) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
@@ -279,6 +290,14 @@ defmodule Associations do
       end
 
   See `has_many/3` for the keys and their defaults.
+
+  Takes `:through` as `has_many/3` does, as long as every association it goes through holds a
+  single record, and fails to compile otherwise.
+
+      association Service do
+        belongs_to :car, Car
+        has_one :owner, through: [:car, :owner]
+      end
   """
   @spec has_one(atom, module, keyword) :: Macro.t()
   defmacro has_one(name, schema, opts \\ []) do
@@ -286,10 +305,8 @@ defmodule Associations do
   end
 
   defmacro __before_compile__(env) do
-    definitions =
-      env.module
-      |> Module.get_attribute(:declarations)
-      |> Map.new(&define/1)
+    declarations = Module.get_attribute(env.module, :declarations)
+    definitions = Associations.Definition.build(declarations)
 
     quote do
       @doc false
@@ -297,51 +314,10 @@ defmodule Associations do
     end
   end
 
-  defp define({schema, :belongs_to, name, target, opts}) do
-    opts = Keyword.validate!(opts, foreign_key: :"#{name}_id", references: :id)
+  defp declare(kind, name, opts, []) when kind in [:has_many, :has_one] and is_list(opts) do
+    {through, opts} = Keyword.pop(opts, :through)
 
-    define(schema, name, target, :one, opts[:foreign_key], opts[:references])
-  end
-
-  defp define({schema, :has_many, name, target, opts}) do
-    opts = Keyword.validate!(opts, foreign_key: default_foreign_key(schema), references: :id)
-
-    define(schema, name, target, :many, opts[:references], opts[:foreign_key])
-  end
-
-  defp define({schema, :has_one, name, target, opts}) do
-    opts = Keyword.validate!(opts, foreign_key: default_foreign_key(schema), references: :id)
-
-    define(schema, name, target, :one, opts[:references], opts[:foreign_key])
-  end
-
-  defp define(schema, name, target, cardinality, from, to) do
-    from = List.wrap(from)
-    to = List.wrap(to)
-
-    if length(from) != length(to) do
-      raise ArgumentError,
-            "the #{inspect(name)} association of #{inspect(schema)} pairs #{inspect(from)} " <>
-              "with #{inspect(to)}, which name a different number of fields"
-    end
-
-    {{schema, name}, %{target: target, cardinality: cardinality, from: from, to: to}}
-  end
-
-  defp default_foreign_key(schema) do
-    :"#{schema |> Module.split() |> List.last() |> Macro.underscore()}_id"
-  end
-
-  @doc false
-  def load(module, record, path, opts) do
-    [{^record, records}] = Resolver.load_many(module, [record], path, opts)
-
-    Resolver.shape(module, record, path, records)
-  end
-
-  @doc false
-  def load_many(module, records, path, opts) when is_list(records) do
-    Resolver.load_many(module, records, path, opts)
+    declare(kind, name, {:through, through}, opts)
   end
 
   defp declare(kind, name, schema, opts) do

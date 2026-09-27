@@ -46,35 +46,10 @@ defmodule Associations.DataloaderTest do
 
       assert Dataloader.get(loader, :garage, :owner, car) == nil
     end
-
-    test "loads a path ending on a has_many association as a list", %{loader: loader} do
-      customer = %Garage.Customer{id: 1, name: "John"}
-
-      loader =
-        loader
-        |> Dataloader.load(:garage, [:cars, :dealer], customer)
-        |> Dataloader.run()
-
-      assert Dataloader.get(loader, :garage, [:cars, :dealer], customer) == [
-               %Garage.Dealer{code: "AAA", name: "Anne"}
-             ]
-    end
-
-    test "loads a path made of single associations as a single record", %{loader: loader} do
-      service = %Garage.Service{id: 1, car_id: 1}
-
-      loader =
-        loader
-        |> Dataloader.load(:garage, [:car, :owner], service)
-        |> Dataloader.run()
-
-      assert Dataloader.get(loader, :garage, [:car, :owner], service) ==
-               %Garage.Customer{id: 1, name: "John"}
-    end
   end
 
   describe "batching" do
-    test "loads every record queued under a path in one list call", %{loader: loader} do
+    test "loads every record queued under a name in one list call", %{loader: loader} do
       customer1 = %Garage.Customer{id: 1, name: "John"}
       customer2 = %Garage.Customer{id: 2, name: "Jane"}
 
@@ -100,7 +75,7 @@ defmodule Associations.DataloaderTest do
              ]
     end
 
-    test "loads records of different schemas queued under a path together", %{loader: loader} do
+    test "loads records of different schemas queued under a name together", %{loader: loader} do
       customer = %Garage.Customer{id: 2, name: "Jane"}
       dealer = %Garage.Dealer{code: "AAA", name: "Anne"}
 
@@ -155,7 +130,7 @@ defmodule Associations.DataloaderTest do
   end
 
   describe "batch keys" do
-    test "accepts a {path, args} pair with empty args", %{loader: loader} do
+    test "accepts a {name, args} pair with empty args", %{loader: loader} do
       customer = %Garage.Customer{id: 2, name: "Jane"}
 
       loader =
@@ -168,7 +143,7 @@ defmodule Associations.DataloaderTest do
              ]
     end
 
-    test "raises for a {path, args} pair with args", %{loader: loader} do
+    test "raises for a {name, args} pair with args", %{loader: loader} do
       customer = %Garage.Customer{id: 1, name: "John"}
 
       assert_raise ArgumentError,
@@ -177,11 +152,11 @@ defmodule Associations.DataloaderTest do
                    fn -> Dataloader.load(loader, :garage, {:cars, %{color: "red"}}, customer) end
     end
 
-    test "raises for a batch key that is not a path", %{loader: loader} do
+    test "raises for a batch key that is not an association name", %{loader: loader} do
       customer = %Garage.Customer{id: 1, name: "John"}
 
       assert_raise ArgumentError,
-                   "expected an association path or a {path, args} pair as the batch key, got: " <>
+                   "expected an association name or a {name, args} pair as the batch key, got: " <>
                      "\"cars\"",
                    fn -> Dataloader.load(loader, :garage, "cars", customer) end
     end

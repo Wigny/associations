@@ -22,17 +22,19 @@ defmodule Garage do
     belongs_to :owner, Customer
     belongs_to :dealer, Dealer, foreign_key: :dealer_code, references: :code
     has_one :registration, Registration
-    has_many :services, Service
     has_many :compatibilities, Compatibility
   end
 
   association Customer do
     has_many :cars, Car, foreign_key: :owner_id
     has_many :invoices, Invoice
+    has_many :dealers, through: [:cars, :dealer]
+    has_many :registrations, through: [:cars, :registration]
   end
 
   association Dealer do
     has_many :cars, Car, foreign_key: :dealer_code, references: :code
+    has_many :registrations, through: [:cars, :registration]
   end
 
   association Registration do
@@ -46,6 +48,7 @@ defmodule Garage do
   association Service do
     belongs_to :car, Car
     has_many :usages, Usage
+    has_one :owner, through: [:car, :owner]
   end
 
   association Part do
