@@ -23,6 +23,12 @@ if Code.ensure_loaded?(Dataloader.Source) do
     A `belongs_to` or a `has_one` answers with a single record, or `nil`, and a `has_many` with a
     list, the way `load/3` does.
 
+    The batch key may also be a `{name, args}` pair, and `args` are then passed to `load_many/3` as
+    its `:args`, so each record is listed with them in a call of its own. A map is turned into a
+    keyword list sorted by key, so the same args given as a map or as a keyword list share a batch.
+
+        Dataloader.load(loader, :garage, {:cars, %{color: "red"}}, customer)
+
     Requires the `:dataloader` dependency. This module is not compiled without it.
     """
 
@@ -44,7 +50,7 @@ if Code.ensure_loaded?(Dataloader.Source) do
 
       * `:async` - whether the batches of the source run concurrently, each in its own task, and
         whether the searches inside a batch do, as `:async` of `load_many/3`. Defaults to `true`.
-        Pass `false` where `c:Associations.list/3` has to run in the process calling
+        Pass `false` where `c:Associations.list/4` has to run in the process calling
         `Dataloader.run/1`, such as inside an `Ecto.Repo` transaction.
 
       * `:timeout` - the time, in milliseconds, a batch may take before the whole source fails.
@@ -144,10 +150,13 @@ if Code.ensure_loaded?(Dataloader.Source) do
         end)
       end
 
-      defp run_batch(%{module: module} = source, {name, items}) do
+      defp run_batch(source, {{name, args}, items}), do: run_batch(source, name, args, items)
+      defp run_batch(source, {name, items}), do: run_batch(source, name, [], items)
+
+      defp run_batch(%{module: module} = source, name, args, items) do
         items
         |> MapSet.to_list()
-        |> module.load_many(name, async: source.opts[:async])
+        |> module.load_many(name, async: source.opts[:async], args: args)
         |> Map.new(fn {item, records} -> {item, Resolver.shape(module, item, name, records)} end)
       end
 
@@ -168,10 +177,8 @@ if Code.ensure_loaded?(Dataloader.Source) do
         normalize_key(name)
       end
 
-      defp normalize_key({name, args}) when is_map(args) or is_list(args) do
-        raise ArgumentError,
-              "Associations.Dataloader cannot apply the arguments #{inspect(args)} " <>
-                "to the #{inspect(name)} association"
+      defp normalize_key({name, args}) when is_atom(name) and (is_map(args) or is_list(args)) do
+        {name, Enum.sort(args)}
       end
 
       defp normalize_key(name) when is_atom(name) and not is_nil(name), do: name

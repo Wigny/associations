@@ -11,7 +11,7 @@ defmodule Associations do
         alias Garage.{Car, Customer, Dealer, Registration}
 
         @impl true
-        def list(schema, fields, values) do
+        def list(schema, fields, values, _args) do
           Garage.Store.list(schema, fields, values)
         end
 
@@ -61,11 +61,11 @@ defmodule Associations do
   a clause written that way can take it apart directly:
 
       @impl true
-      def list(Car, [:owner_id], values) do
+      def list(Car, [:owner_id], values, _args) do
         Store.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end))
       end
 
-      def list(Part, [:manufacturer_code, :part_number], values) do
+      def list(Part, [:manufacturer_code, :part_number], values, _args) do
         Catalogue.list_parts(Enum.map(values, fn [code, number] -> {code, number} end))
       end
 
@@ -73,7 +73,7 @@ defmodule Associations do
   to say which value belongs to which field:
 
       @impl true
-      def list(schema, fields, values) do
+      def list(schema, fields, values, _args) do
         Store.list_matching(schema, Enum.map(values, &Enum.zip(fields, &1)))
       end
 
@@ -81,6 +81,16 @@ defmodule Associations do
   wanted within one; `load/3` and `load_many/3` group them by `fields` themselves. A record
   matching none of the rows asked for is ignored, so a source that can only answer more coarsely,
   by each field separately, may return more than it was asked for.
+
+  `args` holds what the caller passed as `:args` to `load/3` or `load_many/3`, and is `[]`
+  otherwise. They are applied to the whole result of the call: a call given args holds the rows of
+  a single record, every row its association reached, even through other associations, so a limit,
+  an order or a page applies to what that record ends on. The records are returned in the order
+  the args set.
+
+      def list(Car, [:owner_id], values, limit: limit) do
+        Store.list_cars(owner_ids: Enum.map(values, fn [owner_id] -> owner_id end), limit: limit)
+      end
 
   A batch of searches is grouped by the fields it searches, so loading one association over
   records of different schemas calls this once per set of fields, each call holding every row
@@ -94,7 +104,8 @@ defmodule Associations do
   Pass `async: false` to `load/3` or `load_many/3` there, and the calls are made in turn, in the
   process asking for them.
   """
-  @callback list(schema :: module, fields :: [atom], values :: [[term]]) :: [struct]
+  @callback list(schema :: module, fields :: [atom], values :: [[term]], args :: keyword) ::
+              [struct]
 
   defmacro __using__(_opts) do
     quote generated: true do
@@ -127,11 +138,16 @@ defmodule Associations do
       ## Options
 
         * `:async` - whether the searches of a single hop are run concurrently, each in its own
-          task. Defaults to `true`. Pass `false` where `c:Associations.list/3` has to run in the
+          task. Defaults to `true`. Pass `false` where `c:Associations.list/4` has to run in the
           process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the
           process that opened it and which a task therefore runs outside of.
+
+        * `:args` - passed as they are to `c:Associations.list/4` when it lists the records the
+          association ends on, such as a filter, an order or a page. The library does not read
+          them. Defaults to `[]`. Given any, the association is listed once per record, not once
+          for all of them, so that the args apply to each record's records as a whole.
       """
-      @spec load(struct, atom, async: boolean) :: struct | [struct] | nil
+      @spec load(struct, atom, async: boolean, args: keyword) :: struct | [struct] | nil
       def load(record, name, opts \\ []) do
         Associations.Resolver.load(__MODULE__, record, name, opts)
       end
@@ -165,7 +181,7 @@ defmodule Associations do
 
       Takes the same options as `load/3`.
       """
-      @spec load_many([struct], atom, async: boolean) :: [{struct, [struct]}]
+      @spec load_many([struct], atom, async: boolean, args: keyword) :: [{struct, [struct]}]
       def load_many(records, name, opts \\ []) do
         Associations.Resolver.load_many(__MODULE__, records, name, opts)
       end

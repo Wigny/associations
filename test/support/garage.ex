@@ -14,8 +14,8 @@ defmodule Garage do
   alias Garage.Usage
 
   @impl true
-  def list(schema, fields, values) do
-    MockStore.list(schema, fields, values)
+  def list(schema, fields, values, args) do
+    MockStore.list(schema, fields, values, args)
   end
 
   association Car do

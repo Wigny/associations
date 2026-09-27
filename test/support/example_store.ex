@@ -25,7 +25,7 @@ defmodule ExampleStore do
   }
 
   @impl true
-  def list(schema, fields, values) do
+  def list(schema, fields, values, _args) do
     @records
     |> Map.fetch!(schema)
     |> Enum.filter(fn record -> Enum.map(fields, &Map.fetch!(record, &1)) in values end)

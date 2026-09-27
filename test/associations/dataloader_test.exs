@@ -53,10 +53,10 @@ defmodule Associations.DataloaderTest do
       customer1 = %Garage.Customer{id: 1, name: "John"}
       customer2 = %Garage.Customer{id: 2, name: "Jane"}
 
-      Mox.expect(MockStore, :list, fn Garage.Car, [:owner_id], values ->
+      Mox.expect(MockStore, :list, fn Garage.Car, [:owner_id], values, [] ->
         assert Enum.sort(values) == [[1], [2]]
 
-        ExampleStore.list(Garage.Car, [:owner_id], values)
+        ExampleStore.list(Garage.Car, [:owner_id], values, [])
       end)
 
       loader =
@@ -98,7 +98,7 @@ defmodule Associations.DataloaderTest do
     test "does not list a record loaded by an earlier run again", %{loader: loader} do
       customer = %Garage.Customer{id: 2, name: "Jane"}
 
-      Mox.expect(MockStore, :list, 1, &ExampleStore.list/3)
+      Mox.expect(MockStore, :list, 1, &ExampleStore.list/4)
 
       loader =
         loader
@@ -117,7 +117,7 @@ defmodule Associations.DataloaderTest do
       customer = %Garage.Customer{id: 2, name: "Jane"}
       car = %Garage.Car{id: 4, color: "green", owner_id: 2}
 
-      Mox.expect(MockStore, :list, 0, &ExampleStore.list/3)
+      Mox.expect(MockStore, :list, 0, &ExampleStore.list/4)
 
       loader =
         loader
@@ -143,13 +143,31 @@ defmodule Associations.DataloaderTest do
              ]
     end
 
-    test "raises for a {name, args} pair with args", %{loader: loader} do
+    test "passes the args of a {name, args} pair to the list call", %{loader: loader} do
       customer = %Garage.Customer{id: 1, name: "John"}
 
-      assert_raise ArgumentError,
-                   "Associations.Dataloader cannot apply the arguments %{color: \"red\"} to the " <>
-                     ":cars association",
-                   fn -> Dataloader.load(loader, :garage, {:cars, %{color: "red"}}, customer) end
+      Mox.expect(MockStore, :list, fn Garage.Car, [:owner_id], [[1]], args ->
+        assert args == [color: "red"]
+
+        []
+      end)
+
+      loader
+      |> Dataloader.load(:garage, {:cars, [color: "red"]}, customer)
+      |> Dataloader.run()
+    end
+
+    test "shares the results of args given as a map and as a keyword list", %{loader: loader} do
+      customer = %Garage.Customer{id: 2, name: "Jane"}
+
+      loader =
+        loader
+        |> Dataloader.load(:garage, {:cars, %{color: "blue", limit: 1}}, customer)
+        |> Dataloader.run()
+
+      assert Dataloader.get(loader, :garage, {:cars, [limit: 1, color: "blue"]}, customer) == [
+               %Garage.Car{id: 3, color: "blue", owner_id: 2, dealer_code: "BBB"}
+             ]
     end
 
     test "raises for a batch key that is not an association name", %{loader: loader} do
@@ -173,7 +191,7 @@ defmodule Associations.DataloaderTest do
     test "returns an error for a record of a batch that raised", %{loader: loader} do
       customer = %Garage.Customer{id: 1, name: "John"}
 
-      Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
+      Mox.expect(MockStore, :list, fn _schema, _fields, _values, _args ->
         raise "the store is unreachable"
       end)
 
@@ -191,7 +209,7 @@ defmodule Associations.DataloaderTest do
       source = Associations.Dataloader.new(Garage, async: false)
       loader = Dataloader.add_source(Dataloader.new(get_policy: :tuples), :garage, source)
 
-      Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
+      Mox.expect(MockStore, :list, fn _schema, _fields, _values, _args ->
         raise "the store is unreachable"
       end)
 
@@ -209,7 +227,7 @@ defmodule Associations.DataloaderTest do
          %{loader: loader} do
       car = %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"}
 
-      Mox.expect(MockStore, :list, fn Garage.Customer, [:id], [[1]] ->
+      Mox.expect(MockStore, :list, fn Garage.Customer, [:id], [[1]], [] ->
         [%Garage.Customer{id: 1, name: "John"}, %Garage.Customer{id: 1, name: "Twin"}]
       end)
 
@@ -250,7 +268,7 @@ defmodule Associations.DataloaderTest do
       source = Associations.Dataloader.new(Garage, async: false)
       loader = Dataloader.add_source(Dataloader.new(), :garage, source)
 
-      Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
+      Mox.expect(MockStore, :list, fn _schema, _fields, _values, _args ->
         assert self() == caller
 
         []
@@ -262,7 +280,7 @@ defmodule Associations.DataloaderTest do
     end
 
     test "lists in another process when async is true", %{loader: loader, test_pid: caller} do
-      Mox.expect(MockStore, :list, fn _schema, _fields, _values ->
+      Mox.expect(MockStore, :list, fn _schema, _fields, _values, _args ->
         send(caller, {:list, self()})
 
         []

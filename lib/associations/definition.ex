@@ -13,9 +13,10 @@ defmodule Associations.Definition do
   One hop of an association.
 
   `:target` is the schema to search, `:from` the fields the values are read off the record at
-  hand, and `:to` the fields of `:target` those values are matched against, one for one.
+  hand, `:to` the fields of `:target` those values are matched against, one for one, and `:args`
+  what `c:Associations.list/4` is given when searching it, `[]` unless the caller passes any.
   """
-  @type step :: %{target: module, from: [atom], to: [atom]}
+  @type step :: %{target: module, from: [atom], to: [atom], args: keyword}
 
   @typedoc """
   An association as its module declares it.
@@ -88,7 +89,7 @@ defmodule Associations.Definition do
               "with #{inspect(to)}, which name a different number of fields"
     end
 
-    step = %{target: target, from: from, to: to}
+    step = %{target: target, from: from, to: to, args: []}
 
     {{schema, name}, %{target: target, cardinality: cardinality, steps: [step]}}
   end

@@ -11,7 +11,7 @@ defmodule Garage do
   alias Garage.{Car, Customer}
 
   @impl true
-  def list(schema, fields, values) do
+  def list(schema, fields, values, _args) do
     Store.list_by(schema, fields, values)
   end
 
