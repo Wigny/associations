@@ -13,21 +13,29 @@ Mix.install([
 
 [JSONPlaceholder](https://jsonplaceholder.typicode.com) serves users, the posts they wrote and the comments those posts received, over three endpoints that filter by query parameter. Each endpoint answers a whole set of values at once, `/comments?postId=1&postId=2` returning the comments of both posts, which is what lets every search below be a single request.
 
-The client turns a schema, the fields being searched and the values being searched for into one request. Every schema says which path it lives at, which query parameter each of its fields is called, and how to read a record out of the response.
+The endpoints also page what they answer, `_page` picking the page and `_limit` its size, so `/comments?postId=1&postId=2&_page=2&_limit=3` answers the fourth to sixth comment of the two posts together.
+
+The client turns a schema, the fields being searched, the values being searched for and an optional page into one request. Every schema says which path it lives at, which query parameter each of its fields is called, and how to read a record out of the response.
 
 ```elixir
 defmodule Client do
-  def list(schema, fields, values) do
-    params =
+  def list(schema, fields, values, args) do
+    filters =
       for row <- values, {field, value} <- Enum.zip(fields, row) do
         {schema.param(field), value}
+      end
+
+    pagination =
+      case Keyword.fetch(args, :page) do
+        {:ok, page} -> [{"_page", page}, {"_limit", Keyword.fetch!(args, :per_page)}]
+        :error -> []
       end
 
     %{body: body} =
       Req.get!(
         base_url: "https://jsonplaceholder.typicode.com/",
         url: schema.path(),
-        params: params
+        params: filters ++ pagination
       )
 
     Enum.map(body, &schema.cast/1)
@@ -38,7 +46,7 @@ end
 <!-- livebook:{"output":true} -->
 
 ```
-{:module, Client, <<70, 79, 82, 49, 0, 0, 10, ...>>, ...}
+{:module, Client, <<70, 79, 82, 49, 0, 0, 12, ...>>, ...}
 ```
 
 ## The schemas
@@ -119,7 +127,7 @@ end
 
 ## The declarations
 
-`Blog` is the only module that knows how the three relate. Its `list/4` leaves the fields open, so the one clause answers every schema, and it logs every call it is asked for so that the requests each load makes are visible below.
+`Blog` is the only module that knows how the three relate. Its `list/4` leaves the fields open, so the one clause answers every schema, hands the args on to the client, and logs every call it is asked for so that the requests each load makes are visible below.
 
 ```elixir
 defmodule Blog do
@@ -128,10 +136,12 @@ defmodule Blog do
   require Logger
 
   @impl true
-  def list(schema, fields, values, _args) do
-    Logger.info("list #{inspect(schema)} by #{inspect(fields)} for #{length(values)} rows")
+  def list(schema, fields, values, args) do
+    Logger.info(
+      "list #{inspect(schema)} by #{inspect(fields)} for #{length(values)} rows with #{inspect(args)}"
+    )
 
-    Client.list(schema, fields, values)
+    Client.list(schema, fields, values, args)
   end
 
   association User do
@@ -170,7 +180,7 @@ posts = Blog.load(user, :posts)
 
 ```
 
-23:05:23.568 [info] list Post by [:user_id] for 1 rows
+23:19:01.421 [info] list Post by [:user_id] for 1 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
@@ -252,7 +262,7 @@ Blog.load(post, :author)
 
 ```
 
-23:05:23.980 [info] list User by [:id] for 1 rows
+23:19:01.832 [info] list User by [:id] for 1 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
@@ -273,7 +283,7 @@ Blog.load([%User{id: 1}, %User{id: 2}, %User{id: 3}], :posts)
 
 ```
 
-23:05:24.006 [info] list Post by [:user_id] for 3 rows
+23:19:01.857 [info] list Post by [:user_id] for 3 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
@@ -481,7 +491,7 @@ List.first(comments_per_post)
 
 ```
 
-23:05:24.031 [info] list Comment by [:post_id] for 10 rows
+23:19:01.882 [info] list Comment by [:post_id] for 10 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
@@ -533,9 +543,9 @@ Blog.load(user, :comments)
 
 ```
 
-23:05:24.054 [info] list Post by [:user_id] for 1 rows
+23:19:01.906 [info] list Post by [:user_id] for 1 rows with []
 
-23:05:24.071 [info] list Comment by [:post_id] for 10 rows
+23:19:01.921 [info] list Comment by [:post_id] for 10 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
@@ -786,6 +796,120 @@ Blog.load(user, :comments)
 ]
 ```
 
+## Paginating
+
+`:args` reaches `list/4` as it was given, for the client to turn into `_page` and `_limit`. A call given args holds the rows of a single record, so the page is a page of each post's comments rather than of the three posts' comments together, and the three posts cost a request each.
+
+```elixir
+Blog.load(Enum.take(posts, 3), :comments, args: [page: 2, per_page: 2])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+
+23:19:01.946 [info] list Comment by [:post_id] for 1 rows with [page: 2, per_page: 2]
+
+23:19:01.947 [info] list Comment by [:post_id] for 1 rows with [page: 2, per_page: 2]
+
+23:19:01.947 [info] list Comment by [:post_id] for 1 rows with [page: 2, per_page: 2]
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  [
+    %Comment{
+      id: 3,
+      post_id: 1,
+      name: "odio adipisci rerum aut animi",
+      body: "quia molestiae reprehenderit quasi aspernatur\naut expedita occaecati aliquam eveniet laudantium\nomnis quibusdam delectus saepe quia accusamus maiores nam est\ncum et ducimus et vero voluptates excepturi deleniti ratione"
+    },
+    %Comment{
+      id: 4,
+      post_id: 1,
+      name: "alias odio sit",
+      body: "non et atque\noccaecati deserunt quas accusantium unde odit nobis qui voluptatem\nquia voluptas consequuntur itaque dolor\net qui rerum deleniti ut occaecati"
+    }
+  ],
+  [
+    %Comment{
+      id: 8,
+      post_id: 2,
+      name: "et omnis dolorem",
+      body: "ut voluptatem corrupti velit\nad voluptatem maiores\net nisi velit vero accusamus maiores\nvoluptates quia aliquid ullam eaque"
+    },
+    %Comment{
+      id: 9,
+      post_id: 2,
+      name: "provident id voluptas",
+      body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+    }
+  ],
+  [
+    %Comment{
+      id: 13,
+      post_id: 3,
+      name: "aut inventore non pariatur sit vitae voluptatem sapiente",
+      body: "fuga eos qui dolor rerum\ninventore corporis exercitationem\ncorporis cupiditate et deserunt recusandae est sed quis culpa\neum maiores corporis et"
+    },
+    %Comment{
+      id: 14,
+      post_id: 3,
+      name: "et officiis id praesentium hic aut ipsa dolorem repudiandae",
+      body: "vel quae voluptas qui exercitationem\nvoluptatibus unde sed\nminima et qui ipsam aspernatur\nexpedita magnam laudantium et et quaerat ut qui dolorum"
+    }
+  ]
+]
+```
+
+Through other associations, the page applies to what the last hop reaches for the record, so the user's comments are paged as one list across every post they wrote. The posts found in between are searched for without the args.
+
+```elixir
+Blog.load(user, :comments, args: [page: 3, per_page: 4])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+
+23:19:02.385 [info] list Post by [:user_id] for 1 rows with []
+
+23:19:02.405 [info] list Comment by [:post_id] for 10 rows with [page: 3, per_page: 4]
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %Comment{
+    id: 9,
+    post_id: 2,
+    name: "provident id voluptas",
+    body: "sapiente assumenda molestiae atque\nadipisci laborum distinctio aperiam et ab ut omnis\net occaecati aspernatur odit sit rem expedita\nquas enim ipsam minus"
+  },
+  %Comment{
+    id: 10,
+    post_id: 2,
+    name: "eaque et deleniti atque tenetur ut quo ut",
+    body: "voluptate iusto quis nobis reprehenderit ipsum amet nulla\nquia quas dolores velit et non\naut quia necessitatibus\nnostrum quaerat nulla et accusamus nisi facilis"
+  },
+  %Comment{
+    id: 11,
+    post_id: 3,
+    name: "fugit labore quia mollitia quas deserunt nostrum sunt",
+    body: "ut dolorum nostrum id quia aut est\nfuga est inventore vel eligendi explicabo quis consectetur\naut occaecati repellat id natus quo est\nut blanditiis quia ut vel ut maiores ea"
+  },
+  %Comment{
+    id: 12,
+    post_id: 3,
+    name: "modi ut eos dolores illum nam dolor",
+    body: "expedita maiores dignissimos facilis\nipsum est rem est fugit velit sequi\neum odio dolores dolor totam\noccaecati ratione eius rem velit"
+  }
+]
+```
+
 ## Running the searches in turn
 
 The searches of a single hop run concurrently, each in its own task. Where `list/4` has to run in the process asking for it, such as inside an `Ecto.Repo` transaction, which is bound to the process that opened it, `async: false` makes the calls in turn instead.
@@ -798,7 +922,7 @@ Blog.load(posts, :comments, async: false)
 
 ```
 
-23:05:24.092 [info] list Comment by [:post_id] for 10 rows
+23:19:02.774 [info] list Comment by [:post_id] for 10 rows with []
 ```
 
 <!-- livebook:{"output":true} -->
