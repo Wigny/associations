@@ -34,13 +34,16 @@ if Code.ensure_loaded?(Dataloader.Source) do
 
     alias Associations.Resolver
 
-    defstruct [:module, :opts, batches: %{}, results: %{}]
+    defstruct [:module, :async, :timeout, batches: %{}, results: %{}]
 
     @opaque t :: %__MODULE__{
               module: module,
-              opts: [async: boolean, timeout: timeout],
-              batches: %{optional(term) => MapSet.t(struct)},
-              results: %{optional(term) => %{optional(struct) => {:ok, term} | {:error, term}}}
+              async: boolean,
+              timeout: timeout,
+              batches: %{optional({atom, keyword}) => MapSet.t(struct)},
+              results: %{
+                optional({atom, keyword}) => %{optional(struct) => {:ok, term} | {:error, term}}
+              }
             }
 
     @doc """
@@ -54,59 +57,83 @@ if Code.ensure_loaded?(Dataloader.Source) do
         `Dataloader.run/1`, such as inside an `Ecto.Repo` transaction.
 
       * `:timeout` - the time, in milliseconds, a batch may take before the whole source fails.
-        Defaults to `30000`.
+        Defaults to `Dataloader.default_timeout/0`.
     """
     @spec new(module, async: boolean, timeout: timeout) :: t
     def new(module, opts \\ []) when is_atom(module) and is_list(opts) do
-      opts = Keyword.validate!(opts, async: true, timeout: to_timeout(second: 30))
+      opts = Keyword.validate!(opts, async: true, timeout: Dataloader.default_timeout())
 
-      %__MODULE__{module: module, opts: opts}
+      %__MODULE__{
+        module: module,
+        async: Keyword.fetch!(opts, :async),
+        timeout: Keyword.fetch!(opts, :timeout)
+      }
     end
 
     defimpl Dataloader.Source do
       def load(source, batch_key, item) do
-        batch_key = normalize_key(batch_key)
+        key = normalize_key(batch_key)
 
-        if fetched?(source.results, batch_key, item) do
-          source
-        else
-          update_in(source.batches, fn batches ->
-            Map.update(batches, batch_key, MapSet.new([item]), &MapSet.put(&1, item))
-          end)
+        case source.results do
+          %{^key => %{^item => {:ok, _result}}} ->
+            source
+
+          _results ->
+            batches = Map.update(source.batches, key, MapSet.new([item]), &MapSet.put(&1, item))
+            %{source | batches: batches}
         end
       end
 
       def put(source, batch_key, item, result) do
-        batch_key = normalize_key(batch_key)
+        key = normalize_key(batch_key)
 
         results =
-          Map.update(source.results, batch_key, {:ok, %{item => result}}, fn
-            {:ok, batch} -> {:ok, Map.put(batch, item, result)}
-            {:error, _reason} -> {:ok, %{item => result}}
-          end)
+          Map.update(
+            source.results,
+            key,
+            %{item => {:ok, result}},
+            &Map.put(&1, item, {:ok, result})
+          )
 
         %{source | results: results}
       end
 
       def fetch(source, batch_key, item) do
-        batch_key = normalize_key(batch_key)
+        key = normalize_key(batch_key)
 
-        case Map.fetch(source.results, batch_key) do
-          {:ok, batch} -> fetch_item(batch, item)
-          :error -> {:error, "Unable to find batch #{inspect(batch_key)}"}
+        case source.results do
+          %{^key => %{^item => result}} -> result
+          %{^key => _batch} -> {:error, "Unable to find item #{inspect(item)} in batch"}
+          _results -> {:error, "Unable to find batch #{inspect(batch_key)}"}
         end
       end
 
       def run(source) do
-        results =
-          Dataloader.async_safely(__MODULE__, :run_batches, [source],
-            async?: Dataloader.Source.async?(source)
-          )
+        outcomes =
+          if source.async do
+            Dataloader.async_safely(Dataloader, :run_tasks, [
+              source.batches,
+              &load_batch(source, &1),
+              [timeout: source.timeout]
+            ])
+          else
+            Map.new(source.batches, fn batch ->
+              try do
+                {batch, {:ok, load_batch(source, batch)}}
+              rescue
+                exception -> {batch, {:error, exception}}
+              end
+            end)
+          end
 
         results =
-          Map.merge(source.results, results, fn
-            _batch_key, {:ok, batch}, {:ok, new_batch} -> {:ok, Map.merge(batch, new_batch)}
-            _batch_key, _batch, new_batch -> new_batch
+          Enum.reduce(outcomes, source.results, fn
+            {{key, _items}, {:ok, loaded}}, results ->
+              Map.update(results, key, loaded, &Map.merge(&1, loaded))
+
+            {{key, items}, {:error, reason}}, results ->
+              failed = Map.new(items, &{&1, {:error, reason}})
+              Map.update(results, key, failed, &Map.merge(&1, failed))
           end)
 
         %{source | batches: %{}, results: results}
@@ -114,74 +141,25 @@ if Code.ensure_loaded?(Dataloader.Source) do
 
       def pending_batches?(source), do: source.batches != %{}
 
-      def timeout(source), do: source.opts[:timeout]
+      def timeout(source), do: source.timeout
 
-      def async?(source), do: source.opts[:async]
+      def async?(source), do: source.async
 
-      def run_batches(source) do
-        batches = Enum.to_list(source.batches)
-        options = [timeout: source.opts[:timeout], on_timeout: :kill_task]
+      defp load_batch(source, {{name, args}, items}) do
+        pairs =
+          source.module.load_many(MapSet.to_list(items), name, args: args, async: source.async)
 
-        results =
-          batches
-          |> run_stream(&run_batch(source, &1), options, async?(source))
-          |> Enum.map(fn
-            {:ok, result} -> {:ok, result}
-            {:exit, reason} -> {:error, reason}
-          end)
-
-        batches
-        |> Enum.map(fn {batch_key, _items} -> batch_key end)
-        |> Enum.zip(results)
-        |> Map.new()
-      end
-
-      defp run_stream(batches, fun, options, true) do
-        Dataloader.async_stream(batches, fun, options)
-      end
-
-      defp run_stream(batches, fun, _options, _async?) do
-        Enum.map(batches, fn batch ->
-          try do
-            {:ok, fun.(batch)}
-          rescue
-            exception -> {:exit, exception}
-          end
+        Map.new(pairs, fn {item, records} ->
+          {item, {:ok, Resolver.shape(source.module, item, name, records)}}
         end)
       end
 
-      defp run_batch(source, {{name, args}, items}), do: run_batch(source, name, args, items)
-      defp run_batch(source, {name, items}), do: run_batch(source, name, [], items)
-
-      defp run_batch(%{module: module} = source, name, args, items) do
-        items
-        |> MapSet.to_list()
-        |> module.load_many(name, async: source.opts[:async], args: args)
-        |> Map.new(fn {item, records} -> {item, Resolver.shape(module, item, name, records)} end)
+      defp normalize_key({name, args})
+           when is_atom(name) and not is_nil(name) and (is_map(args) or is_list(args)) do
+        {name, args |> Enum.to_list() |> Enum.sort_by(&elem(&1, 0))}
       end
 
-      defp fetch_item({:error, _reason} = error, _item), do: error
-
-      defp fetch_item({:ok, batch}, item) do
-        case Map.fetch(batch, item) do
-          {:ok, result} -> {:ok, result}
-          :error -> {:error, "Unable to find item #{inspect(item)} in batch"}
-        end
-      end
-
-      defp fetched?(results, batch_key, item) do
-        match?(%{^batch_key => {:ok, %{^item => _result}}}, results)
-      end
-
-      defp normalize_key({name, args}) when args == %{} or args == [] do
-        normalize_key(name)
-      end
-
-      defp normalize_key({name, args}) when is_atom(name) and (is_map(args) or is_list(args)) do
-        {name, Enum.sort(args)}
-      end
-
-      defp normalize_key(name) when is_atom(name) and not is_nil(name), do: name
+      defp normalize_key(name) when is_atom(name) and not is_nil(name), do: {name, []}
 
       defp normalize_key(batch_key) do
         raise ArgumentError,

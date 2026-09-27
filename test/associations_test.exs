@@ -200,6 +200,12 @@ defmodule AssociationsTest do
       end
     end
 
+    test "raises for an association name that is not an atom" do
+      assert_raise ArgumentError, "expected an association name, got: \"cars\"", fn ->
+        Garage.load(%Garage.Customer{id: 1}, "cars")
+      end
+    end
+
     test "loads a has_many association through other associations without repeats" do
       owner_id = 1
       dealer_code = "AAA"
@@ -515,6 +521,34 @@ defmodule AssociationsTest do
              ]
     end
 
+    test "lists records ending on the same rows in a different order in one call when given args" do
+      owner_id1 = 1
+      owner_id2 = 2
+
+      customer1 = %Garage.Customer{id: owner_id1}
+      customer2 = %Garage.Customer{id: owner_id2}
+
+      car1 = %Garage.Car{id: 1, owner_id: owner_id1, dealer_code: "AAA"}
+      car2 = %Garage.Car{id: 2, owner_id: owner_id1, dealer_code: "BBB"}
+      car3 = %Garage.Car{id: 3, owner_id: owner_id2, dealer_code: "BBB"}
+      car4 = %Garage.Car{id: 4, owner_id: owner_id2, dealer_code: "AAA"}
+
+      anne = %Garage.Dealer{code: "AAA", name: "Anne"}
+
+      Mox.expect(MockStore, :list, 2, fn
+        Garage.Car, [:owner_id], [[^owner_id1], [^owner_id2]], [] ->
+          [car1, car2, car3, car4]
+
+        Garage.Dealer, [:code], [["AAA"], ["BBB"]], [limit: 1] ->
+          [anne]
+      end)
+
+      assert Garage.load_many([customer1, customer2], :dealers, args: [limit: 1]) == [
+               {customer1, [anne]},
+               {customer2, [anne]}
+             ]
+    end
+
     test "loads the association of records of different schemas" do
       owner_id = 1
       dealer_code = "AAA"
@@ -684,6 +718,36 @@ defmodule AssociationsTest do
 
                      association Garage.Customer do
                        has_many :dealers, through: []
+                     end
+                   end
+                 end
+  end
+
+  test "raises for an association going through another association declared with through" do
+    assert_raise ArgumentError,
+                 "the :dealers association of Garage.Invoice goes through :dealers, which " <>
+                   "Garage.Customer does not declare as a belongs_to, has_many or has_one",
+                 fn ->
+                   defmodule Warehouse do
+                     use Associations
+
+                     @impl true
+                     def list(_schema, _fields, _values, _args), do: []
+
+                     association Garage.Car do
+                       belongs_to :dealer, Garage.Dealer,
+                         foreign_key: :dealer_code,
+                         references: :code
+                     end
+
+                     association Garage.Customer do
+                       has_many :cars, Garage.Car, foreign_key: :owner_id
+                       has_many :dealers, through: [:cars, :dealer]
+                     end
+
+                     association Garage.Invoice do
+                       belongs_to :customer, Garage.Customer
+                       has_many :dealers, through: [:customer, :dealers]
                      end
                    end
                  end

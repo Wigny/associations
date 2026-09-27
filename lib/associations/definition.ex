@@ -3,11 +3,12 @@ defmodule Associations.Definition do
 
   @typedoc """
   An association as `Associations` records it while the module is compiled: the schema it is
-  declared on, its kind, its name, the schema it points at, or `{:through, names}`, and its options.
+  declared on, its kind, its name, the schema it points at, or the `:through` options in its
+  place, and its options.
   """
   @type declaration ::
           {schema :: module, kind :: :belongs_to | :has_many | :has_one, name :: atom,
-           target :: module | {:through, term}, opts :: keyword}
+           target :: module | keyword, opts :: keyword}
 
   @typedoc """
   One hop of an association.
@@ -43,7 +44,7 @@ defmodule Associations.Definition do
     {throughs, declarations} =
       Enum.split_with(
         declarations,
-        &match?({_schema, _kind, _name, {:through, _hops}, _opts}, &1)
+        fn {_schema, _kind, _name, target, _opts} -> is_list(target) end
       )
 
     definitions = Map.new(declarations, &define/1)
@@ -94,8 +95,9 @@ defmodule Associations.Definition do
     {{schema, name}, %{target: target, cardinality: cardinality, steps: [step]}}
   end
 
-  defp define_through({schema, kind, name, {:through, through}, opts}, definitions) do
-    Keyword.validate!(opts, [])
+  defp define_through({schema, kind, name, opts, []}, definitions) do
+    opts = Keyword.validate!(opts, [:through])
+    through = Keyword.get(opts, :through)
 
     if not is_list(through) or through == [] do
       raise ArgumentError,

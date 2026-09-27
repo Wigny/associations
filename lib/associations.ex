@@ -109,6 +109,8 @@ defmodule Associations do
 
   defmacro __using__(_opts) do
     quote generated: true do
+      @behaviour Associations
+
       import Associations,
         only: [
           association: 2,
@@ -119,8 +121,6 @@ defmodule Associations do
           has_one: 2,
           has_one: 3
         ]
-
-      @behaviour Associations
 
       Module.register_attribute(__MODULE__, :declarations, accumulate: true)
 
@@ -240,7 +240,10 @@ defmodule Associations do
   """
   @spec belongs_to(atom, module, keyword) :: Macro.t()
   defmacro belongs_to(name, schema, opts \\ []) do
-    declare(:belongs_to, name, schema, opts)
+    quote do
+      @declarations {@association_schema, :belongs_to, unquote(name), unquote(schema),
+                     unquote(opts)}
+    end
   end
 
   @doc """
@@ -292,7 +295,10 @@ defmodule Associations do
   """
   @spec has_many(atom, module, keyword) :: Macro.t()
   defmacro has_many(name, schema, opts \\ []) do
-    declare(:has_many, name, schema, opts)
+    quote do
+      @declarations {@association_schema, :has_many, unquote(name), unquote(schema),
+                     unquote(opts)}
+    end
   end
 
   @doc """
@@ -317,7 +323,9 @@ defmodule Associations do
   """
   @spec has_one(atom, module, keyword) :: Macro.t()
   defmacro has_one(name, schema, opts \\ []) do
-    declare(:has_one, name, schema, opts)
+    quote do
+      @declarations {@association_schema, :has_one, unquote(name), unquote(schema), unquote(opts)}
+    end
   end
 
   defmacro __before_compile__(env) do
@@ -327,19 +335,6 @@ defmodule Associations do
     quote do
       @doc false
       def __definitions__, do: unquote(Macro.escape(definitions))
-    end
-  end
-
-  defp declare(kind, name, opts, []) when kind in [:has_many, :has_one] and is_list(opts) do
-    {through, opts} = Keyword.pop(opts, :through)
-
-    declare(kind, name, {:through, through}, opts)
-  end
-
-  defp declare(kind, name, schema, opts) do
-    quote do
-      @declarations {@association_schema, unquote(kind), unquote(name), unquote(schema),
-                     unquote(opts)}
     end
   end
 end

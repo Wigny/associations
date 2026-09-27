@@ -178,6 +178,15 @@ defmodule Associations.DataloaderTest do
                      "\"cars\"",
                    fn -> Dataloader.load(loader, :garage, "cars", customer) end
     end
+
+    test "raises for a nil batch key", %{loader: loader} do
+      customer = %Garage.Customer{id: 1, name: "John"}
+
+      assert_raise ArgumentError,
+                   "expected an association name or a {name, args} pair as the batch key, got: " <>
+                     "nil",
+                   fn -> Dataloader.load(loader, :garage, nil, customer) end
+    end
   end
 
   describe "errors" do
@@ -220,6 +229,33 @@ defmodule Associations.DataloaderTest do
 
       assert {:error, %RuntimeError{message: "the store is unreachable"}} =
                Dataloader.get(loader, :garage, :cars, customer)
+    end
+
+    @tag :capture_log
+    test "keeps the results of an earlier run when a later batch under the same key fails",
+         %{loader: loader} do
+      customer1 = %Garage.Customer{id: 1, name: "John"}
+      customer2 = %Garage.Customer{id: 2, name: "Jane"}
+
+      Mox.expect(MockStore, :list, &ExampleStore.list/4)
+
+      Mox.expect(MockStore, :list, fn _schema, _fields, _values, _args ->
+        raise "the store is unreachable"
+      end)
+
+      loader =
+        loader
+        |> Dataloader.load(:garage, :cars, customer1)
+        |> Dataloader.run()
+        |> Dataloader.load(:garage, :cars, customer2)
+        |> Dataloader.run()
+
+      assert Dataloader.get(loader, :garage, :cars, customer1) ==
+               {:ok,
+                [
+                  %Garage.Car{id: 1, color: "red", owner_id: 1, dealer_code: "AAA"},
+                  %Garage.Car{id: 2, color: "yellow", owner_id: 1, dealer_code: "AAA"}
+                ]}
     end
 
     @tag :capture_log
@@ -291,6 +327,18 @@ defmodule Associations.DataloaderTest do
       |> Dataloader.run()
 
       assert_received {:list, pid} when pid != caller
+    end
+
+    test "times out after the timeout it is given" do
+      source = Associations.Dataloader.new(Garage, timeout: to_timeout(second: 1))
+
+      assert Dataloader.Source.timeout(source) == to_timeout(second: 1)
+    end
+
+    test "times out after the Dataloader default timeout by default" do
+      source = Associations.Dataloader.new(Garage)
+
+      assert Dataloader.Source.timeout(source) == Dataloader.default_timeout()
     end
 
     test "rejects an unknown option" do

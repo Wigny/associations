@@ -52,8 +52,9 @@ defmodule Associations.Resolver do
   """
   @spec load_many(module, [struct], atom, async: boolean, args: keyword) :: [{struct, [struct]}]
   def load_many(module, records, name, opts) when is_list(records) do
+    opts = Keyword.validate!(opts, args: [], async: true)
     definitions = module.__definitions__()
-    args = Keyword.get(opts, :args, [])
+    args = Keyword.fetch!(opts, :args)
 
     walks =
       Enum.map(records, fn %schema{} = record ->
@@ -114,7 +115,7 @@ defmodule Associations.Resolver do
   defp pending_lookups({[], _records}), do: []
 
   defp list_all(module, rows, opts) do
-    if Keyword.get(opts, :async, true) do
+    if Keyword.fetch!(opts, :async) do
       tasks = Task.async_stream(rows, &list_safely(module, &1), timeout: :infinity)
 
       Enum.map(tasks, &unwrap!/1)
